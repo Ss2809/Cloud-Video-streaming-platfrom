@@ -13,6 +13,7 @@ import {
   Sparkles,
 } from 'lucide-react';
 import OtpInput from './OtpInput';
+import authService from '../services/authService';
 
 export default function AuthModal({
   isOpen,
@@ -25,6 +26,7 @@ export default function AuthModal({
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
   const [otp, setOtp] = useState('');
+  const [devOtp, setDevOtp] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
@@ -37,6 +39,7 @@ export default function AuthModal({
       setMode(initialMode);
       setStep('input');
       setOtp('');
+      setDevOtp('');
       setErrorMsg('');
       setSuccessMsg('');
     }
@@ -61,7 +64,7 @@ export default function AuthModal({
     return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(val.trim());
   };
 
-  // Step 1: Send OTP handler (Mock Node.js API call)
+  // Step 1: Send OTP handler (Connected to Express backend: /api/auth/register or /api/auth/login)
   const handleSendOtp = async (e) => {
     e.preventDefault();
     setErrorMsg('');
@@ -80,23 +83,32 @@ export default function AuthModal({
     setIsLoading(true);
 
     try {
-      // Simulate future Node.js/Express backend call:
-      // await axios.post('/api/auth/send-otp', { email, name: mode === 'signup' ? fullName : undefined });
-      await new Promise((resolve) => setTimeout(resolve, 800));
+      if (mode === 'signup') {
+        const res = await authService.register(fullName.trim(), email.trim());
+        if (res.previewOtp) setDevOtp(res.previewOtp);
+        setSuccessMsg(res.message || `Verification code sent to ${email.trim()}`);
+      } else {
+        const res = await authService.login(email.trim());
+        if (res.previewOtp) setDevOtp(res.previewOtp);
+        setSuccessMsg(res.message || `Login code sent to ${email.trim()}`);
+      }
 
       setStep('otp');
       setCountdown(30);
       setCanResend(false);
       setOtp('');
-      setSuccessMsg(`Verification code sent to ${email.trim()}`);
     } catch (err) {
-      setErrorMsg('Unable to dispatch verification code. Please try again.');
+      const serverMessage =
+        err.response?.data?.message ||
+        err.message ||
+        'Unable to dispatch verification code. Please try again.';
+      setErrorMsg(serverMessage);
     } finally {
       setIsLoading(false);
     }
   };
 
-  // Step 2: Verify OTP & Authenticate
+  // Step 2: Verify OTP & Authenticate (Connected to Express backend: /api/auth/verify-otp)
   const handleVerifyOtp = async (e) => {
     e.preventDefault();
     setErrorMsg('');
@@ -110,18 +122,24 @@ export default function AuthModal({
     setIsLoading(true);
 
     try {
-      // Simulate future Node.js/Express backend call:
-      // const res = await axios.post('/api/auth/verify-otp', { email, otp, name: fullName });
-      await new Promise((resolve) => setTimeout(resolve, 900));
+      const res = await authService.verifyOtp(
+        email.trim(),
+        otp.trim(),
+        mode === 'signup' ? 'register' : 'login'
+      );
 
-      // Successful authentication
+      // Successful authentication with JWT
       const userData = {
-        name: mode === 'signup' ? fullName.trim() : email.split('@')[0],
-        email: email.trim(),
-        avatar: mode === 'signup' ? fullName.trim().charAt(0).toUpperCase() : email.charAt(0).toUpperCase(),
-        role: 'member',
-        createdAt: new Date().toISOString(),
+        _id: res.user._id,
+        name: res.user.name,
+        email: res.user.email,
+        role: res.user.role,
+        avatar: res.user.name ? res.user.name.charAt(0).toUpperCase() : 'U',
+        createdAt: res.user.createdAt,
       };
+
+      // Redirect authenticated users to Home
+      window.location.hash = '#home';
 
       if (onSuccess) {
         onSuccess(userData, mode === 'signup' ? 'created' : 'loggedin');
@@ -129,13 +147,17 @@ export default function AuthModal({
 
       onClose();
     } catch (err) {
-      setErrorMsg('Invalid or expired verification code. Please try again.');
+      const serverMessage =
+        err.response?.data?.message ||
+        err.message ||
+        'Invalid or expired verification code. Please check and try again.';
+      setErrorMsg(serverMessage);
     } finally {
       setIsLoading(false);
     }
   };
 
-  // Resend OTP handler
+  // Resend OTP handler (Connected to Express backend: /api/auth/send-otp)
   const handleResendOtp = async () => {
     if (!canResend || isLoading) return;
 
@@ -143,13 +165,23 @@ export default function AuthModal({
     setIsLoading(true);
 
     try {
-      await new Promise((resolve) => setTimeout(resolve, 700));
+      const res = await authService.sendOtp(
+        email.trim(),
+        mode === 'signup' ? 'register' : 'login',
+        fullName.trim()
+      );
+
+      if (res.previewOtp) setDevOtp(res.previewOtp);
       setCountdown(30);
       setCanResend(false);
       setOtp('');
-      setSuccessMsg(`A new 6-digit code has been sent to ${email.trim()}`);
+      setSuccessMsg(res.message || `A new 6-digit code has been sent to ${email.trim()}`);
     } catch (err) {
-      setErrorMsg('Failed to resend code. Please try again.');
+      const serverMessage =
+        err.response?.data?.message ||
+        err.message ||
+        'Failed to resend code. Please try again.';
+      setErrorMsg(serverMessage);
     } finally {
       setIsLoading(false);
     }
@@ -437,21 +469,23 @@ export default function AuthModal({
                 )}
               </button>
 
-              {/* Testing Demo Helper Note */}
-              <div className="p-3 rounded-xl bg-zinc-900/60 border border-zinc-800/80 text-center">
-                <p className="text-[11px] text-zinc-500">
-                  <Sparkles className="w-3 h-3 text-purple-400 inline mr-1" />
-                  Frontend Demo: Enter any 6 digits (e.g.{' '}
-                  <button
-                    type="button"
-                    onClick={() => setOtp('123456')}
-                    className="text-purple-400 underline font-mono font-bold"
-                  >
-                    123456
-                  </button>
-                  ) to simulate instant verification.
-                </p>
-              </div>
+              {/* Code Autofill Helper if available */}
+              {devOtp && (
+                <div className="p-3 rounded-xl bg-purple-950/40 border border-purple-800/60 text-center animate-fadeIn">
+                  <p className="text-[11px] text-purple-200">
+                    <Sparkles className="w-3.5 h-3.5 text-purple-400 inline mr-1" />
+                    Dev Code from Server: Click{' '}
+                    <button
+                      type="button"
+                      onClick={() => setOtp(devOtp)}
+                      className="text-purple-300 underline font-mono font-bold tracking-wider hover:text-white cursor-pointer"
+                    >
+                      {devOtp}
+                    </button>{' '}
+                    to autofill.
+                  </p>
+                </div>
+              )}
             </form>
           )}
         </div>
