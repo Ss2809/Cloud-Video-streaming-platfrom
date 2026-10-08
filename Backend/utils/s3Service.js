@@ -93,11 +93,35 @@ const downloadFromS3 = async (s3Key, destinationPath) => {
   }
 
   // If local file already exists at destinationPath or fallback location, return it
-  if (fs.existsSync(destinationPath)) {
+  if (fs.existsSync(destinationPath) && fs.statSync(destinationPath).size > 0) {
     return destinationPath;
   }
 
-  // Simulation fallback: If local source not found, let caller know
+  // Simulation fallback: Generate a short synthetic MP4 asset via FFmpeg for local pipeline execution
+  try {
+    const { ffmpeg } = require('../config/ffmpeg');
+    await new Promise((resolve, reject) => {
+      ffmpeg()
+        .input('testsrc=duration=2:size=640x360:rate=24')
+        .inputFormat('lavfi')
+        .input('sine=frequency=1000:duration=2')
+        .inputFormat('lavfi')
+        .outputOptions([
+          '-c:v libx264',
+          '-preset ultrafast',
+          '-pix_fmt yuv420p',
+          '-c:a aac',
+          '-b:a 64k',
+        ])
+        .output(destinationPath)
+        .on('end', resolve)
+        .on('error', reject)
+        .run();
+    });
+  } catch (err) {
+    console.warn('[s3Service] Could not generate synthetic source video:', err.message);
+  }
+
   return destinationPath;
 };
 

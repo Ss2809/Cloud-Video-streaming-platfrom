@@ -11,13 +11,13 @@ function App() {
   const [currentRoute, setCurrentRoute] = useState(() => {
     const hash = window.location.hash;
     const path = window.location.pathname;
-    if (hash === '#browse' || path === '/browse') return 'browse';
-    if (hash === '#watch' || path === '/watch') return 'watch';
-    if (hash === '#admin-upload' || path === '/admin/upload') return 'admin-upload';
-    if (hash === '#video-management' || path === '/admin/videos') return 'video-management';
-    if (hash === '#admin-dashboard' || path === '/admin/dashboard' || path === '/admin')
+    if (hash.startsWith('#browse') || path.startsWith('/browse')) return 'browse';
+    if (hash.startsWith('#watch') || path.startsWith('/watch')) return 'watch';
+    if (hash.startsWith('#admin-upload') || path.startsWith('/admin/upload')) return 'admin-upload';
+    if (hash.startsWith('#video-management') || path.startsWith('/admin/videos')) return 'video-management';
+    if (hash.startsWith('#admin-dashboard') || path.startsWith('/admin/dashboard') || path === '/admin')
       return 'admin-dashboard';
-    if (hash === '#watchlist' || hash === '#history' || path === '/library') return 'watchlist';
+    if (hash.startsWith('#watchlist') || hash.startsWith('#history') || path.startsWith('/library')) return 'watchlist';
     return 'home';
   });
 
@@ -25,17 +25,17 @@ function App() {
     const handleHashChange = () => {
       const hash = window.location.hash;
       const path = window.location.pathname;
-      if (hash === '#browse' || path === '/browse') {
+      if (hash.startsWith('#browse') || path.startsWith('/browse')) {
         setCurrentRoute('browse');
-      } else if (hash === '#watch' || path === '/watch') {
+      } else if (hash.startsWith('#watch') || path.startsWith('/watch')) {
         setCurrentRoute('watch');
-      } else if (hash === '#admin-upload' || path === '/admin/upload') {
+      } else if (hash.startsWith('#admin-upload') || path.startsWith('/admin/upload')) {
         setCurrentRoute('admin-upload');
-      } else if (hash === '#video-management' || path === '/admin/videos') {
+      } else if (hash.startsWith('#video-management') || path.startsWith('/admin/videos')) {
         setCurrentRoute('video-management');
-      } else if (hash === '#admin-dashboard' || path === '/admin/dashboard' || path === '/admin') {
+      } else if (hash.startsWith('#admin-dashboard') || path.startsWith('/admin/dashboard') || path === '/admin') {
         setCurrentRoute('admin-dashboard');
-      } else if (hash === '#watchlist' || hash === '#history' || path === '/library') {
+      } else if (hash.startsWith('#watchlist') || hash.startsWith('#history') || path.startsWith('/library')) {
         setCurrentRoute('watchlist');
       } else if (hash === '#home' || hash === '') {
         setCurrentRoute('home');

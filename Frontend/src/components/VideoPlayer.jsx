@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
+import Hls from 'hls.js';
 import {
   Play,
   Pause,
@@ -27,6 +28,7 @@ export default function VideoPlayer({
   title = 'Video Stream',
   autoPlay = false,
   onQualityChange,
+  onPlay,
 }) {
   const videoRef = useRef(null);
   const containerRef = useRef(null);
@@ -46,27 +48,76 @@ export default function VideoPlayer({
   const [isLoading, setIsLoading] = useState(true);
   const [hasError, setHasError] = useState(false);
   const [isScrubbing, setIsScrubbing] = useState(false);
+  const hlsRef = useRef(null);
 
-  /*
-   * -------------------------------------------------------------
-   * Future HLS.js Architecture Hook:
-   * -------------------------------------------------------------
-   * In production with AWS Elemental MediaConvert / CloudFront HLS:
-   * 
-   * import Hls from 'hls.js';
-   * useEffect(() => {
-   *   if (Hls.isSupported() && videoSource.endsWith('.m3u8')) {
-   *     const hls = new Hls({ autoStartLoad: true, enableWorker: true });
-   *     hls.loadSource(videoSource);
-   *     hls.attachMedia(videoRef.current);
-   *     hls.on(Hls.Events.MANIFEST_PARSED, () => {
-   *       if (autoPlay) videoRef.current.play();
-   *     });
-   *     return () => hls.destroy();
-   *   }
-   * }, [videoSource]);
-   * -------------------------------------------------------------
-   */
+  // Initialize HLS.js or native playback on videoSource change
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+
+    setHasError(false);
+    setIsLoading(true);
+
+    if (hlsRef.current) {
+      hlsRef.current.destroy();
+      hlsRef.current = null;
+    }
+
+    const isHls =
+      typeof videoSource === 'string' &&
+      (videoSource.includes('.m3u8') || videoSource.includes('hls'));
+
+    if (isHls && Hls.isSupported()) {
+      const hls = new Hls({
+        autoStartLoad: true,
+        enableWorker: true,
+        lowLatencyMode: true,
+      });
+      hlsRef.current = hls;
+
+      hls.loadSource(videoSource);
+      hls.attachMedia(video);
+
+      hls.on(Hls.Events.MANIFEST_PARSED, () => {
+        setIsLoading(false);
+        setHasError(false);
+        if (autoPlay) {
+          video.play().catch(() => {});
+        }
+      });
+
+      hls.on(Hls.Events.ERROR, (event, data) => {
+        if (data.fatal) {
+          switch (data.type) {
+            case Hls.ErrorTypes.NETWORK_ERROR:
+              hls.startLoad();
+              break;
+            case Hls.ErrorTypes.MEDIA_ERROR:
+              hls.recoverMediaError();
+              break;
+            default:
+              hls.destroy();
+              setHasError(true);
+              setIsLoading(false);
+              break;
+          }
+        }
+      });
+
+      return () => {
+        if (hlsRef.current) {
+          hlsRef.current.destroy();
+          hlsRef.current = null;
+        }
+      };
+    } else if (isHls && video.canPlayType('application/vnd.apple.mpegurl')) {
+      // Native Safari HLS
+      video.src = videoSource;
+    } else {
+      // Standard MP4 stream
+      video.src = videoSource;
+    }
+  }, [videoSource, autoPlay]);
 
   // Synchronize initial volume & state
   useEffect(() => {
@@ -198,7 +249,20 @@ export default function VideoPlayer({
     if (onQualityChange) {
       onQualityChange(qualityId);
     }
-    // Simulated quality switch indicator
+    if (hlsRef.current && hlsRef.current.levels && hlsRef.current.levels.length > 0) {
+      if (qualityId === 'auto') {
+        hlsRef.current.currentLevel = -1;
+      } else {
+        const targetHeight = parseInt(qualityId, 10);
+        const levelIndex = hlsRef.current.levels.findIndex(
+          (lvl) => lvl.height === targetHeight
+        );
+        if (levelIndex !== -1) {
+          hlsRef.current.currentLevel = levelIndex;
+        }
+      }
+    }
+    // Brief quality switch indicator
     setIsLoading(true);
     setTimeout(() => setIsLoading(false), 300);
   };
@@ -224,14 +288,17 @@ export default function VideoPlayer({
       onMouseLeave={() => isPlaying && setShowControls(false)}
       className="relative w-full aspect-video bg-black rounded-2xl md:rounded-3xl overflow-hidden shadow-2xl shadow-purple-950/30 select-none group border border-zinc-800/80"
     >
-      {/* Native HTML5 Video Element with Mock HLS Source */}
+      {/* HTML5 Video Element with HLS / Adaptive Streaming */}
       <video
         ref={videoRef}
-        src={videoSource}
         poster={posterUrl}
         playsInline
         preload="metadata"
         onClick={togglePlay}
+        onPlay={() => {
+          setIsPlaying(true);
+          onPlay?.();
+        }}
         onTimeUpdate={handleTimeUpdate}
         onLoadedMetadata={handleLoadedMetadata}
         onWaiting={() => setIsLoading(true)}

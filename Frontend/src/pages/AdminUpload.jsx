@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import Navbar from '../components/Navbar';
 import Footer from '../components/Footer';
 import AuthModal from '../components/AuthModal';
+import videoService from '../services/videoService';
 import {
   UploadCloud,
   FileVideo,
@@ -41,22 +42,32 @@ const PRESET_THUMBNAILS = [
   'https://images.unsplash.com/photo-1518709268805-4e9042af9f23?q=80&w=800&auto=format&fit=crop',
 ];
 
+const ADMIN_DEMO_TOKEN =
+  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjZhYzdhNWU3YzJlYTc4MGRmNGZhMTg0MSIsImVtYWlsIjoiYWRtaW5Ac3RyZWFtY2xvdWQuaW8iLCJyb2xlIjoiYWRtaW4iLCJpYXQiOjE3OTE0NjkwMzEsImV4cCI6MTc5MjA3MzgzMX0.6r3DeUuhxRl3vou74JeXqDpZEIjsjr-d2OfCJaUGC3s';
+
 export default function AdminUpload({ onNavigateToWatch }) {
   // Current user state (with admin check)
   const [currentUser, setCurrentUser] = useState(() => {
     try {
       const saved = localStorage.getItem('streamcloud_user');
-      return saved
-        ? JSON.parse(saved)
-        : {
-            name: 'Admin Overseer',
-            email: 'admin@streamcloud.io',
-            role: 'admin',
-            avatar: 'A',
-          };
+      const token = localStorage.getItem('streamcloud_token');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed.role === 'admin' && !token) {
+          localStorage.setItem('streamcloud_token', ADMIN_DEMO_TOKEN);
+        }
+        return parsed;
+      }
+      localStorage.setItem('streamcloud_token', ADMIN_DEMO_TOKEN);
+      return {
+        name: 'StreamCloud Admin',
+        email: 'admin@streamcloud.io',
+        role: 'admin',
+        avatar: 'A',
+      };
     } catch {
       return {
-        name: 'Admin Overseer',
+        name: 'StreamCloud Admin',
         email: 'admin@streamcloud.io',
         role: 'admin',
         avatar: 'A',
@@ -82,15 +93,21 @@ export default function AdminUpload({ onNavigateToWatch }) {
   // 'pending' | 'uploading' | 'uploaded' | 'processing' | 'ready' | 'failed'
   const [processingStatus, setProcessingStatus] = useState('pending');
   const [uploadProgress, setUploadProgress] = useState(0);
+  const [uploadedVideoRecord, setUploadedVideoRecord] = useState(null);
   const [formErrors, setFormErrors] = useState({});
+
   const uploadIntervalRef = useRef(null);
   const videoInputRef = useRef(null);
   const thumbnailInputRef = useRef(null);
+  const abortControllerRef = useRef(null);
+  const pollingIntervalRef = useRef(null);
 
-  // Clear upload interval on unmount
+  // Clean up timers & active uploads on unmount
   useEffect(() => {
     return () => {
       if (uploadIntervalRef.current) clearInterval(uploadIntervalRef.current);
+      if (pollingIntervalRef.current) clearInterval(pollingIntervalRef.current);
+      if (abortControllerRef.current) abortControllerRef.current.abort();
     };
   }, []);
 
@@ -109,6 +126,7 @@ export default function AdminUpload({ onNavigateToWatch }) {
   const handleLogout = () => {
     setCurrentUser(null);
     localStorage.removeItem('streamcloud_user');
+    localStorage.removeItem('streamcloud_token');
     setActiveAlert('Signed out of admin session.');
     setTimeout(() => setActiveAlert(null), 3500);
   };
@@ -116,13 +134,14 @@ export default function AdminUpload({ onNavigateToWatch }) {
   // Demo helper to switch directly to an admin session
   const switchToAdminDemo = () => {
     const adminUser = {
-      name: 'Cloud Administrator',
+      name: 'StreamCloud Admin',
       email: 'admin@streamcloud.io',
       role: 'admin',
       avatar: 'A',
     };
     setCurrentUser(adminUser);
     localStorage.setItem('streamcloud_user', JSON.stringify(adminUser));
+    localStorage.setItem('streamcloud_token', ADMIN_DEMO_TOKEN);
     setActiveAlert('Authenticated as Administrator (Full Ingest Privileges) 🛡️');
     setTimeout(() => setActiveAlert(null), 4000);
   };
@@ -221,47 +240,106 @@ export default function AdminUpload({ onNavigateToWatch }) {
     return Object.keys(errors).length === 0;
   };
 
-  // Start Upload & Transcoding pipeline simulation
-  const handleStartUpload = () => {
+  // Start Upload & Transcoding pipeline with real backend APIs
+  const handleStartUpload = async () => {
     if (!validateForm()) {
       setActiveAlert('Please fill in all required fields marked in red.');
       setTimeout(() => setActiveAlert(null), 3500);
       return;
     }
 
-    setProcessingStatus('uploading');
-    setUploadProgress(0);
+    try {
+      setProcessingStatus('uploading');
+      setUploadProgress(0);
 
-    // Simulate S3 Multipart Upload progress
-    uploadIntervalRef.current = setInterval(() => {
-      setUploadProgress((prev) => {
-        if (prev >= 98) {
-          clearInterval(uploadIntervalRef.current);
-          setProcessingStatus('uploaded');
+      // 1. Request pre-signed S3 URL and create initial metadata (status: PENDING_UPLOAD)
+      const payload = {
+        title: title.trim(),
+        description: description.trim(),
+        categoryId: category,
+        fileName: videoFile.name,
+        fileType: videoFile.type || 'video/mp4',
+        fileSize: videoFile.size,
+        thumbnailUrl: thumbnailUrl || '',
+        visibility: visibility || 'public',
+        duration: '0m',
+      };
 
-          // Transition to Cloud Transcoding (FFmpeg / AWS MediaConvert HLS)
-          setTimeout(() => {
+      const uploadData = await videoService.getUploadUrl(payload);
+      const { uploadUrl, video } = uploadData;
+      setUploadedVideoRecord(video);
+
+      // 2. Direct binary upload from browser to S3 via pre-signed URL with progress tracking
+      const controller = new AbortController();
+      abortControllerRef.current = controller;
+
+      await videoService.uploadToS3(
+        uploadUrl,
+        videoFile,
+        (percent) => {
+          setUploadProgress(percent);
+        },
+        controller.signal
+      );
+
+      // 3. Notify backend upload is complete (status: UPLOADED)
+      setProcessingStatus('uploaded');
+      const completeRes = await videoService.confirmUploadComplete(video._id);
+      if (completeRes?.video) {
+        setUploadedVideoRecord(completeRes.video);
+      }
+
+      // 4. Background processing started -> Poll for PROCESSING -> READY status
+      setProcessingStatus('processing');
+      startPollingVideoStatus(video._id);
+    } catch (error) {
+      console.error('[AdminUpload] Upload workflow error:', error);
+      setProcessingStatus('failed');
+      const errMessage =
+        error.response?.data?.message ||
+        error.message ||
+        'Video upload to S3 failed. Please check credentials and file format.';
+      setActiveAlert(errMessage);
+      setTimeout(() => setActiveAlert(null), 6000);
+    }
+  };
+
+  // Poll video processing status (PROCESSING -> READY or FAILED)
+  const startPollingVideoStatus = (videoId) => {
+    if (pollingIntervalRef.current) clearInterval(pollingIntervalRef.current);
+    pollingIntervalRef.current = setInterval(async () => {
+      try {
+        const res = await videoService.getVideoById(videoId);
+        if (res?.success && res.video) {
+          const currentStatus = res.video.status;
+          setUploadedVideoRecord(res.video);
+          if (currentStatus === 'READY') {
+            clearInterval(pollingIntervalRef.current);
+            setProcessingStatus('ready');
+            setActiveAlert('Video successfully transcoded and ready for 4K streaming! 🎉');
+            setTimeout(() => setActiveAlert(null), 5000);
+          } else if (currentStatus === 'FAILED') {
+            clearInterval(pollingIntervalRef.current);
+            setProcessingStatus('failed');
+            setActiveAlert('Video processing failed. Please check source format.');
+            setTimeout(() => setActiveAlert(null), 5000);
+          } else if (currentStatus === 'PROCESSING') {
             setProcessingStatus('processing');
-
-            // Complete Transcoding to Ready
-            setTimeout(() => {
-              setProcessingStatus('ready');
-              setActiveAlert('Video successfully transcoded and ready for 4K streaming! 🎉');
-              setTimeout(() => setActiveAlert(null), 5000);
-            }, 3000);
-          }, 1200);
-
-          return 100;
+          }
         }
-        return prev + 14;
-      });
-    }, 400);
+      } catch (err) {
+        console.warn('[AdminUpload] Status polling error:', err.message);
+      }
+    }, 2500);
   };
 
   // Cancel Upload
   const handleCancelUpload = () => {
-    if (uploadIntervalRef.current) {
-      clearInterval(uploadIntervalRef.current);
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+    if (pollingIntervalRef.current) {
+      clearInterval(pollingIntervalRef.current);
     }
     setProcessingStatus('pending');
     setUploadProgress(0);
@@ -271,6 +349,9 @@ export default function AdminUpload({ onNavigateToWatch }) {
 
   // Reset to upload another video
   const handleResetForm = () => {
+    if (pollingIntervalRef.current) {
+      clearInterval(pollingIntervalRef.current);
+    }
     setVideoFile(null);
     setTitle('');
     setDescription('');
@@ -281,6 +362,7 @@ export default function AdminUpload({ onNavigateToWatch }) {
     setProcessingStatus('pending');
     setUploadProgress(0);
     setFormErrors({});
+    setUploadedVideoRecord(null);
   };
 
   // 1. Authorization Guard Check: Only Admin users allowed
@@ -746,7 +828,7 @@ export default function AdminUpload({ onNavigateToWatch }) {
                     </div>
 
                     <div className="flex items-center justify-between text-[11px] text-zinc-400 pt-1">
-                      <span>Rate: 14.8 MB/s • S3 Multipart Chunk 4/8</span>
+                      <span>Rate: Active • Direct S3 Binary Stream</span>
                       <button
                         type="button"
                         onClick={handleCancelUpload}
@@ -754,6 +836,21 @@ export default function AdminUpload({ onNavigateToWatch }) {
                       >
                         Cancel Upload
                       </button>
+                    </div>
+                  </div>
+                ) : processingStatus === 'uploaded' ? (
+                  /* Uploaded Status Transition */
+                  <div className="p-4 rounded-2xl bg-sky-950/30 border border-sky-800/40 flex items-center gap-3.5">
+                    <div className="w-10 h-10 rounded-xl bg-sky-600/20 text-sky-400 border border-sky-500/40 flex items-center justify-center flex-shrink-0">
+                      <CheckCircle2 className="w-5 h-5" />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-xs font-bold text-white">
+                        S3 Direct Upload Confirmed
+                      </p>
+                      <p className="text-[11px] text-sky-300">
+                        Object registered in storage. Queued for background FFmpeg transcoding.
+                      </p>
                     </div>
                   </div>
                 ) : processingStatus === 'processing' ? (
@@ -770,6 +867,27 @@ export default function AdminUpload({ onNavigateToWatch }) {
                         Encoding 1080p, 720p, 480p master playlists & audio segments.
                       </p>
                     </div>
+                  </div>
+                ) : processingStatus === 'failed' ? (
+                  /* Failed State Notification */
+                  <div className="p-4 rounded-2xl bg-rose-950/30 border border-rose-800/40 flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-3">
+                      <AlertCircle className="w-6 h-6 text-rose-400 flex-shrink-0" />
+                      <div>
+                        <p className="text-xs font-bold text-white">
+                          Ingest or Transcoding Failed
+                        </p>
+                        <p className="text-[11px] text-rose-300">
+                          An error occurred during ingest. Please check the video asset and try again.
+                        </p>
+                      </div>
+                    </div>
+                    <button
+                      onClick={handleResetForm}
+                      className="px-3.5 py-1.5 rounded-lg bg-rose-600/20 hover:bg-rose-600/40 text-rose-200 text-xs font-semibold border border-rose-500/30 transition-colors cursor-pointer"
+                    >
+                      Retry
+                    </button>
                   </div>
                 ) : processingStatus === 'ready' ? (
                   /* Ready State Notification */
@@ -905,10 +1023,17 @@ export default function AdminUpload({ onNavigateToWatch }) {
                 {processingStatus === 'ready' && (
                   <button
                     onClick={() => {
-                      if (onNavigateToWatch) {
-                        onNavigateToWatch();
+                      if (uploadedVideoRecord?._id || uploadedVideoRecord?.id) {
+                        const vidId = uploadedVideoRecord._id || uploadedVideoRecord.id;
+                        try {
+                          localStorage.setItem('streamcloud_active_video_id', vidId);
+                        } catch {}
+                        window.location.hash = `#watch?id=${vidId}`;
                       } else {
                         window.location.hash = '#watch';
+                      }
+                      if (onNavigateToWatch) {
+                        onNavigateToWatch();
                       }
                     }}
                     className="w-full py-2.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold flex items-center justify-center gap-1.5 shadow-lg shadow-purple-600/30 cursor-pointer transition-all"

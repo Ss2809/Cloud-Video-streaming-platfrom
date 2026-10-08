@@ -69,8 +69,10 @@ export default function Home() {
   };
 
   const handlePlayVideo = (video) => {
-    setActiveAlert(`Now Playing: "${video.title}" (Stream Ready)`);
-    setTimeout(() => setActiveAlert(null), 4000);
+    try {
+      localStorage.setItem('streamcloud_active_video_id', video.id || video._id);
+    } catch {}
+    window.location.hash = `#watch?id=${video.id || video._id}`;
   };
 
   // Filter trending videos based on search and selected category

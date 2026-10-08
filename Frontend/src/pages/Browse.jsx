@@ -92,8 +92,10 @@ export default function Browse() {
   };
 
   const handlePlayVideo = (video) => {
-    setActiveAlert(`Now Streaming: "${video.title}" (4K HDR)`);
-    setTimeout(() => setActiveAlert(null), 4000);
+    try {
+      localStorage.setItem('streamcloud_active_video_id', video.id || video._id);
+    } catch {}
+    window.location.hash = `#watch?id=${video.id || video._id}`;
   };
 
   // Trigger brief simulated loading skeleton when category or sort changes
