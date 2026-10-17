@@ -10,66 +10,66 @@ It features direct-to-S3 high-speed uploads, asynchronous job queuing with Dead-
 
 ```mermaid
 flowchart TD
-    subgraph ClientLayer["🖥️ Frontend Client (React + Vite + HLS.js)"]
+    subgraph ClientLayer["Frontend Client (React + Vite + HLS.js)"]
         AdminUpload["Admin Direct Upload UI"]
         Player["4K HLS.js Video Player"]
         Dashboard["Admin Dashboard & Catalog UI"]
     end
 
-    subgraph APILayer["⚡ API Gateway / Express Backend (Node.js)"]
+    subgraph APILayer["API Gateway & Express Backend (Node.js)"]
         API["Express REST API (Port 5000)"]
         AuthSvc["Auth & OTP Service (Gmail SMTP)"]
         Presigner["S3 Pre-signed URL Generator"]
     end
 
-    subgraph AWSCloud["☁️ AWS Cloud Services"]
+    subgraph AWSCloud["AWS Cloud Services"]
         S3Raw["Private S3 Bucket (raw-uploads/)"]
         SQSQueue["AWS SQS Processing Queue"]
         SQSDLQ["AWS SQS Dead-Letter Queue (DLQ)"]
-        S3HLS["Private S3 Bucket (videos/{id}/hls)"]
+        S3HLS["Private S3 Bucket (videos/hls)"]
         CloudFront["AWS CloudFront CDN (OAC Origin)"]
     end
 
-    subgraph WorkerLayer["⚙️ Background Transcoding Daemon (Node.js + FFmpeg)"]
+    subgraph WorkerLayer["Background Transcoding Daemon (Node.js + FFmpeg)"]
         Worker["SQS Worker Daemon (worker.js)"]
         FFmpegProc["FFmpeg Multi-Bitrate Engine"]
     end
 
-    subgraph DBLayer["🗄️ Database"]
-        MongoDB[("MongoDB 127.0.0.1:27017")]
+    subgraph DBLayer["Database"]
+        MongoDB[("MongoDB Database")]
     end
 
     %% Upload & Transcoding Flow
-    AdminUpload -->|1. Request Pre-signed URL| API
-    API -->|Generate Signed PUT URL| Presigner
-    Presigner -.->|Return Upload URL & S3 Key| AdminUpload
-    AdminUpload -->|2. Direct-to-S3 Upload (PUT)| S3Raw
+    AdminUpload -->|"1. Request Pre-signed URL"| API
+    API -->|"Generate Signed PUT URL"| Presigner
+    Presigner -.->|"Return Upload URL & S3 Key"| AdminUpload
+    AdminUpload -->|"2. Direct-to-S3 Upload via PUT"| S3Raw
 
-    AdminUpload -->|3. POST /api/videos/:id/upload-complete| API
-    API -->|Update Status: UPLOADED| MongoDB
-    API -->|4. SendMessageCommand| SQSQueue
-    API -.->|200 OK + SQS Message ID| AdminUpload
+    AdminUpload -->|"3. POST /api/videos/:id/upload-complete"| API
+    API -->|"Update Status: UPLOADED"| MongoDB
+    API -->|"4. SendMessageCommand"| SQSQueue
+    API -.->|"200 OK + SQS Message ID"| AdminUpload
 
     %% Worker Consumption & Transcoding
-    SQSQueue -->|5. Long-Poll ReceiveMessage| Worker
-    Worker -->|Idempotency Check| MongoDB
-    Worker -->|6. Set Status: PROCESSING| MongoDB
-    Worker -->|7. Fetch Source Asset| S3Raw
-    Worker -->|8. Transcode 360p, 480p, 720p, 1080p| FFmpegProc
-    FFmpegProc -->|Extract poster.jpg & master.m3u8| Worker
+    SQSQueue -->|"5. Long-Poll ReceiveMessage"| Worker
+    Worker -->|"Idempotency Check"| MongoDB
+    Worker -->|"6. Set Status: PROCESSING"| MongoDB
+    Worker -->|"7. Fetch Source Asset"| S3Raw
+    Worker -->|"8. Transcode 360p, 480p, 720p, 1080p"| FFmpegProc
+    FFmpegProc -->|"Extract poster.jpg & master.m3u8"| Worker
 
-    Worker -->|9. Upload HLS streams & Poster| S3HLS
-    Worker -->|10. Set Status: READY & HLS Key| MongoDB
-    Worker -->|11. DeleteMessageCommand| SQSQueue
+    Worker -->|"9. Upload HLS streams & Poster"| S3HLS
+    Worker -->|"10. Set Status: READY & HLS Key"| MongoDB
+    Worker -->|"11. DeleteMessageCommand"| SQSQueue
 
-    Worker -.->|Max Retries Exceeded (Attempt > 3)| SQSDLQ
-    SQSDLQ -.->|Set Status: FAILED| MongoDB
+    Worker -.->|"Max Retries Exceeded (Attempt 3+)"| SQSDLQ
+    SQSDLQ -.->|"Set Status: FAILED"| MongoDB
 
     %% Playback Flow
-    Player -->|12. GET /api/videos/:id| API
-    API -->|Return CloudFront Master Playlist URL| Player
-    Player -->|13. Stream master.m3u8 & .ts Segments (OAC)| CloudFront
-    CloudFront -->|Secure OAC S3 Fetch| S3HLS
+    Player -->|"12. GET /api/videos/:id"| API
+    API -->|"Return CloudFront Master Playlist URL"| Player
+    Player -->|"13. Stream master.m3u8 & .ts Segments (OAC)"| CloudFront
+    CloudFront -->|"Secure OAC S3 Fetch"| S3HLS
 ```
 
 ---
@@ -81,15 +81,15 @@ The diagram below details the complete lifecycle of a video from ingest to CDN p
 ```mermaid
 sequenceDiagram
     autonumber
-    actor Admin as 🛡️ Admin / Creator
-    actor User as 👤 Viewer
-    participant UI as 🖥️ Frontend (React)
-    participant API as ⚡ Express Backend
-    participant DB as 🗄️ MongoDB
-    participant S3 as 🪣 AWS S3 (Private)
-    participant SQS as 📬 AWS SQS Queue
-    participant Worker as ⚙️ Worker Daemon
-    participant CF as 🌐 AWS CloudFront CDN
+    actor Admin as "Admin / Creator"
+    actor User as "Viewer"
+    participant UI as "Frontend (React)"
+    participant API as "Express Backend"
+    participant DB as "MongoDB"
+    participant S3 as "AWS S3 (Private)"
+    participant SQS as "AWS SQS Queue"
+    participant Worker as "Worker Daemon"
+    participant CF as "AWS CloudFront CDN"
 
     %% Authentication Flow
     Note over User,API: 1. Passwordless OTP Authentication
@@ -112,7 +112,7 @@ sequenceDiagram
     UI->>S3: Direct Upload (PUT binary video stream with Progress Bar)
     S3-->>UI: 200 OK (Upload Complete)
     UI->>API: POST /api/videos/:id/upload-complete
-    API->>DB: Update Video Status -> UPLOADED
+    API->>DB: Update Video Status to UPLOADED
     API->>SQS: SendMessageCommand (videoId, s3Key, metadata)
     API-->>UI: 200 OK (Job Enqueued in SQS)
 
@@ -123,14 +123,14 @@ sequenceDiagram
     end
     SQS-->>Worker: Dispatch Video Job Message
     Worker->>DB: Check Status (If READY, discard duplicate)
-    Worker->>DB: Update Video Status -> PROCESSING
+    Worker->>DB: Update Video Status to PROCESSING
     Worker->>S3: Download original raw video
     Worker->>Worker: Probe resolution & duration (FFprobe)
     Worker->>Worker: Extract poster.jpg thumbnail (FFmpeg)
     Worker->>Worker: Transcode Renditions (360p, 480p, 720p, 1080p)
     Worker->>Worker: Generate master.m3u8 playlist
     Worker->>S3: Upload /hls directory (.m3u8, .ts) & poster.jpg
-    Worker->>DB: Update Status -> READY, hlsKey & thumbnailUrl
+    Worker->>DB: Update Status to READY, hlsKey & thumbnailUrl
     Worker->>SQS: DeleteMessageCommand (ReceiptHandle)
 
     %% Playback Flow
