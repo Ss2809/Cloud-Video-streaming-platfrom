@@ -1,8 +1,32 @@
 import React from 'react';
 import { Play, Info, Star, Clock, Sparkles } from 'lucide-react';
 
-export default function Hero({ movie }) {
+export default function Hero({ movie, onPlayVideo, onMoreInfo }) {
   if (!movie) return null;
+
+  const handleWatch = () => {
+    if (onPlayVideo) {
+      onPlayVideo(movie);
+    } else {
+      const vidId = movie.id || movie._id || '6ac7a809bfbea0f11934b1f9';
+      try {
+        localStorage.setItem('streamcloud_active_video_id', vidId);
+      } catch {}
+      window.location.hash = `#watch?id=${vidId}`;
+    }
+  };
+
+  const handleInfo = () => {
+    if (onMoreInfo) {
+      onMoreInfo(movie);
+    } else {
+      const vidId = movie.id || movie._id || '6ac7a809bfbea0f11934b1f9';
+      try {
+        localStorage.setItem('streamcloud_active_video_id', vidId);
+      } catch {}
+      window.location.hash = `#watch?id=${vidId}`;
+    }
+  };
 
   return (
     <section id="home" className="relative w-full min-h-[80vh] lg:min-h-[88vh] flex items-end pb-16 pt-28 overflow-hidden">
@@ -73,15 +97,15 @@ export default function Hero({ movie }) {
           {/* Buttons: Watch Now & More Info */}
           <div className="flex flex-wrap items-center gap-3 pt-2">
             <button
-              onClick={() => alert(`Starting playback: ${movie.title}`)}
+              onClick={handleWatch}
               className="flex items-center justify-center gap-2.5 px-6 sm:px-8 py-3.5 rounded-xl font-semibold text-sm sm:text-base text-white bg-gradient-to-r from-purple-600 via-purple-500 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 shadow-xl shadow-purple-600/30 hover:shadow-purple-600/50 hover:scale-[1.02] active:scale-[0.98] transition-all duration-200 cursor-pointer"
             >
-              <Play className="w-5 h-5 fill-current" />
+              <Play className="w-5 h-5 fill-current ml-0.5" />
               <span>Watch Now</span>
             </button>
 
             <button
-              onClick={() => alert(`Showing info for: ${movie.title}`)}
+              onClick={handleInfo}
               className="flex items-center justify-center gap-2 px-5 sm:px-6 py-3.5 rounded-xl font-medium text-sm sm:text-base text-zinc-200 bg-zinc-900/80 hover:bg-zinc-800/90 border border-zinc-700/70 hover:border-purple-500/50 backdrop-blur-md hover:text-white transition-all duration-200 cursor-pointer"
             >
               <Info className="w-5 h-5 text-purple-400" />

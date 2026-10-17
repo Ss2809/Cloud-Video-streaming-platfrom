@@ -13,6 +13,7 @@ const {
   uploadFileToS3,
   uploadDirectoryToS3,
 } = require('../utils/s3Service');
+const { getCloudFrontUrl } = require('../utils/cloudfrontService');
 
 /**
  * Process a single video through the FFmpeg + HLS pipeline
@@ -102,7 +103,7 @@ const processVideo = async (videoId, options = {}) => {
     // 8. Update MongoDB Video document to READY
     video.status = 'READY';
     video.hlsKey = s3MasterKey;
-    video.thumbnailUrl = `https://${process.env.AWS_S3_BUCKET || 'streamcloud-raw-videos'}.s3.${process.env.AWS_REGION || 'us-east-1'}.amazonaws.com/${s3ThumbKey}`;
+    video.thumbnailUrl = getCloudFrontUrl(s3ThumbKey);
     video.duration = probeData.formattedDuration;
     await video.save();
 

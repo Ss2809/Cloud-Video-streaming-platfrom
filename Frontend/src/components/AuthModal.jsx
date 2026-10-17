@@ -10,7 +10,6 @@ import {
   CheckCircle2,
   AlertCircle,
   Play,
-  Sparkles,
 } from 'lucide-react';
 import OtpInput from './OtpInput';
 import authService from '../services/authService';
@@ -26,7 +25,6 @@ export default function AuthModal({
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
   const [otp, setOtp] = useState('');
-  const [devOtp, setDevOtp] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
@@ -39,7 +37,6 @@ export default function AuthModal({
       setMode(initialMode);
       setStep('input');
       setOtp('');
-      setDevOtp('');
       setErrorMsg('');
       setSuccessMsg('');
     }
@@ -85,11 +82,9 @@ export default function AuthModal({
     try {
       if (mode === 'signup') {
         const res = await authService.register(fullName.trim(), email.trim());
-        if (res.previewOtp) setDevOtp(res.previewOtp);
         setSuccessMsg(res.message || `Verification code sent to ${email.trim()}`);
       } else {
         const res = await authService.login(email.trim());
-        if (res.previewOtp) setDevOtp(res.previewOtp);
         setSuccessMsg(res.message || `Login code sent to ${email.trim()}`);
       }
 
@@ -171,7 +166,6 @@ export default function AuthModal({
         fullName.trim()
       );
 
-      if (res.previewOtp) setDevOtp(res.previewOtp);
       setCountdown(30);
       setCanResend(false);
       setOtp('');
@@ -468,24 +462,6 @@ export default function AuthModal({
                   </>
                 )}
               </button>
-
-              {/* Code Autofill Helper if available */}
-              {devOtp && (
-                <div className="p-3 rounded-xl bg-purple-950/40 border border-purple-800/60 text-center animate-fadeIn">
-                  <p className="text-[11px] text-purple-200">
-                    <Sparkles className="w-3.5 h-3.5 text-purple-400 inline mr-1" />
-                    Dev Code from Server: Click{' '}
-                    <button
-                      type="button"
-                      onClick={() => setOtp(devOtp)}
-                      className="text-purple-300 underline font-mono font-bold tracking-wider hover:text-white cursor-pointer"
-                    >
-                      {devOtp}
-                    </button>{' '}
-                    to autofill.
-                  </p>
-                </div>
-              )}
             </form>
           )}
         </div>

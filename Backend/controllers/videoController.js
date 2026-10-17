@@ -7,6 +7,8 @@ const {
   generateS3Key,
   generatePresignedUploadUrl,
 } = require('../utils/s3Service');
+const { formatVideoWithCloudFront } = require('../utils/cloudfrontService');
+const { sendProcessingJob } = require('../utils/sqsService');
 
 const VALID_STATUSES = ['PENDING_UPLOAD', 'UPLOADED', 'PROCESSING', 'READY', 'FAILED'];
 const VALID_VISIBILITIES = ['public', 'private'];
@@ -104,7 +106,7 @@ const createVideo = async (req, res, next) => {
     return res.status(201).json({
       success: true,
       message: 'Video metadata created successfully.',
-      video: populatedVideo,
+      video: formatVideoWithCloudFront(populatedVideo),
     });
   } catch (error) {
     next(error);
@@ -213,7 +215,7 @@ const getVideos = async (req, res, next) => {
       total,
       totalPages,
       currentPage: pageNum,
-      videos,
+      videos: videos.map(formatVideoWithCloudFront),
     });
   } catch (error) {
     next(error);
@@ -260,7 +262,7 @@ const getVideoById = async (req, res, next) => {
 
     return res.status(200).json({
       success: true,
-      video,
+      video: formatVideoWithCloudFront(video),
     });
   } catch (error) {
     next(error);
@@ -608,14 +610,29 @@ const confirmUploadComplete = async (req, res, next) => {
     video.status = 'UPLOADED';
     await video.save();
 
+    // Dispatch asynchronous video-processing job to SQS queue
+    let sqsJob = null;
+    try {
+      sqsJob = await sendProcessingJob({
+        videoId: video._id,
+        s3Key: video.originalKey,
+        title: video.title,
+        duration: video.duration,
+        categoryId: video.categoryId,
+      });
+    } catch (sqsErr) {
+      console.warn(`[videoController] SQS job dispatch warning: ${sqsErr.message}`);
+    }
+
     const updatedVideo = await Video.findById(video._id)
       .populate('creatorId', 'name email role')
       .populate('categoryId', 'name slug');
 
     return res.status(200).json({
       success: true,
-      message: 'Video upload confirmed. Status updated to UPLOADED.',
-      video: updatedVideo,
+      message: 'Video upload confirmed. Processing job queued in SQS.',
+      video: formatVideoWithCloudFront(updatedVideo),
+      sqs: sqsJob,
     });
   } catch (error) {
     next(error);

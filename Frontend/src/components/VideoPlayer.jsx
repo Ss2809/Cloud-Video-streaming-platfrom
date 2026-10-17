@@ -29,11 +29,13 @@ export default function VideoPlayer({
   autoPlay = false,
   onQualityChange,
   onPlay,
+  onProgressUpdate,
 }) {
   const videoRef = useRef(null);
   const containerRef = useRef(null);
   const controlsTimeoutRef = useRef(null);
   const progressRef = useRef(null);
+  const lastProgressSaveRef = useRef(0);
 
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
@@ -45,10 +47,15 @@ export default function VideoPlayer({
   const [showControls, setShowControls] = useState(true);
   const [showSettings, setShowSettings] = useState(false);
   const [selectedQuality, setSelectedQuality] = useState('auto');
+  const [availableQualities, setAvailableQualities] = useState(QUALITY_OPTIONS);
+  const [activeResolution, setActiveResolution] = useState('');
   const [isLoading, setIsLoading] = useState(true);
   const [hasError, setHasError] = useState(false);
+  const [errorMessage, setErrorMessage] = useState('');
+  const [isUnsupported, setIsUnsupported] = useState(false);
   const [isScrubbing, setIsScrubbing] = useState(false);
   const hlsRef = useRef(null);
+  const retryCountRef = useRef(0);
 
   // Initialize HLS.js or native playback on videoSource change
   useEffect(() => {
@@ -56,7 +63,10 @@ export default function VideoPlayer({
     if (!video) return;
 
     setHasError(false);
+    setErrorMessage('');
+    setIsUnsupported(false);
     setIsLoading(true);
+    retryCountRef.current = 0;
 
     if (hlsRef.current) {
       hlsRef.current.destroy();
@@ -67,52 +77,105 @@ export default function VideoPlayer({
       typeof videoSource === 'string' &&
       (videoSource.includes('.m3u8') || videoSource.includes('hls'));
 
-    if (isHls && Hls.isSupported()) {
-      const hls = new Hls({
-        autoStartLoad: true,
-        enableWorker: true,
-        lowLatencyMode: true,
-      });
-      hlsRef.current = hls;
+    if (isHls) {
+      if (Hls.isSupported()) {
+        const hls = new Hls({
+          autoStartLoad: true,
+          enableWorker: true,
+          lowLatencyMode: true,
+          capLevelToPlayerSize: true,
+        });
+        hlsRef.current = hls;
 
-      hls.loadSource(videoSource);
-      hls.attachMedia(video);
+        hls.loadSource(videoSource);
+        hls.attachMedia(video);
 
-      hls.on(Hls.Events.MANIFEST_PARSED, () => {
-        setIsLoading(false);
-        setHasError(false);
+        hls.on(Hls.Events.MANIFEST_PARSED, (event, data) => {
+          setIsLoading(false);
+          setHasError(false);
+          retryCountRef.current = 0;
+
+          // Populate dynamic qualities from parsed manifest
+          if (data && data.levels && data.levels.length > 0) {
+            const mapped = [
+              { id: 'auto', label: 'Auto (Recommended)', bitrate: 'Adaptive' },
+              ...data.levels
+                .map((lvl, index) => {
+                  const height = lvl.height || Math.round((lvl.width * 9) / 16) || 720;
+                  const mbps = lvl.bitrate ? `${(lvl.bitrate / 1000000).toFixed(1)} Mbps` : 'HD';
+                  return {
+                    id: `${height}p`,
+                    levelIndex: index,
+                    height,
+                    label: `${height}p ${height >= 720 ? '(HD)' : '(SD)'}`,
+                    bitrate: mbps,
+                  };
+                })
+                .sort((a, b) => b.height - a.height),
+            ];
+            setAvailableQualities(mapped);
+          }
+
+          if (autoPlay) {
+            video.play().catch(() => {});
+          }
+        });
+
+        // Adaptive level switched event
+        hls.on(Hls.Events.LEVEL_SWITCHED, (event, data) => {
+          if (hls.levels && hls.levels[data.level]) {
+            const lvl = hls.levels[data.level];
+            const height = lvl.height || Math.round((lvl.width * 9) / 16) || 720;
+            setActiveResolution(`${height}p`);
+          }
+        });
+
+        hls.on(Hls.Events.ERROR, (event, data) => {
+          if (data.fatal) {
+            switch (data.type) {
+              case Hls.ErrorTypes.NETWORK_ERROR:
+                if (retryCountRef.current < 3) {
+                  retryCountRef.current += 1;
+                  console.warn(`[VideoPlayer] Retrying CloudFront HLS network load (${retryCountRef.current}/3)...`);
+                  hls.startLoad();
+                } else {
+                  setHasError(true);
+                  setErrorMessage('Failed to connect to CloudFront video stream. Please check network connectivity or CORS.');
+                  setIsLoading(false);
+                  hls.destroy();
+                }
+                break;
+              case Hls.ErrorTypes.MEDIA_ERROR:
+                console.warn('[VideoPlayer] Media error encountered, recovering...');
+                hls.recoverMediaError();
+                break;
+              default:
+                setHasError(true);
+                setErrorMessage('An unexpected error occurred during playback.');
+                setIsLoading(false);
+                hls.destroy();
+                break;
+            }
+          }
+        });
+
+        return () => {
+          if (hlsRef.current) {
+            hlsRef.current.destroy();
+            hlsRef.current = null;
+          }
+        };
+      } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+        // Native Safari HLS
+        video.src = videoSource;
         if (autoPlay) {
           video.play().catch(() => {});
         }
-      });
-
-      hls.on(Hls.Events.ERROR, (event, data) => {
-        if (data.fatal) {
-          switch (data.type) {
-            case Hls.ErrorTypes.NETWORK_ERROR:
-              hls.startLoad();
-              break;
-            case Hls.ErrorTypes.MEDIA_ERROR:
-              hls.recoverMediaError();
-              break;
-            default:
-              hls.destroy();
-              setHasError(true);
-              setIsLoading(false);
-              break;
-          }
-        }
-      });
-
-      return () => {
-        if (hlsRef.current) {
-          hlsRef.current.destroy();
-          hlsRef.current = null;
-        }
-      };
-    } else if (isHls && video.canPlayType('application/vnd.apple.mpegurl')) {
-      // Native Safari HLS
-      video.src = videoSource;
+      } else {
+        // Browser does not support HLS
+        setIsUnsupported(true);
+        setIsLoading(false);
+      }
     } else {
       // Standard MP4 stream
       video.src = videoSource;
@@ -171,7 +234,8 @@ export default function VideoPlayer({
   // Time Updates
   const handleTimeUpdate = () => {
     if (videoRef.current && !isScrubbing) {
-      setCurrentTime(videoRef.current.currentTime);
+      const curr = videoRef.current.currentTime;
+      setCurrentTime(curr);
 
       // Compute buffer progress
       if (videoRef.current.buffered.length > 0) {
@@ -180,6 +244,16 @@ export default function VideoPlayer({
         );
         const totalDuration = videoRef.current.duration || 1;
         setBufferedPercent(Math.min((bufferedEnd / totalDuration) * 100, 100));
+      }
+
+      // Periodically trigger onProgressUpdate (every 5 seconds)
+      if (onProgressUpdate) {
+        const totalDuration = videoRef.current.duration || 1;
+        if (Math.abs(curr - lastProgressSaveRef.current) >= 5) {
+          lastProgressSaveRef.current = curr;
+          const pct = Math.min(Math.round((curr / totalDuration) * 100), 100);
+          onProgressUpdate({ currentTime: curr, duration: totalDuration, progressPercent: pct });
+        }
       }
     }
   };
@@ -251,14 +325,20 @@ export default function VideoPlayer({
     }
     if (hlsRef.current && hlsRef.current.levels && hlsRef.current.levels.length > 0) {
       if (qualityId === 'auto') {
-        hlsRef.current.currentLevel = -1;
+        hlsRef.current.currentLevel = -1; // -1 enables automatic adaptive bitrate
+        setActiveResolution('');
       } else {
-        const targetHeight = parseInt(qualityId, 10);
-        const levelIndex = hlsRef.current.levels.findIndex(
-          (lvl) => lvl.height === targetHeight
-        );
-        if (levelIndex !== -1) {
-          hlsRef.current.currentLevel = levelIndex;
+        const found = availableQualities.find((q) => q.id === qualityId);
+        if (found && found.levelIndex !== undefined) {
+          hlsRef.current.currentLevel = found.levelIndex;
+        } else {
+          const targetHeight = parseInt(qualityId, 10);
+          const levelIndex = hlsRef.current.levels.findIndex(
+            (lvl) => (lvl.height || Math.round((lvl.width * 9) / 16)) === targetHeight
+          );
+          if (levelIndex !== -1) {
+            hlsRef.current.currentLevel = levelIndex;
+          }
         }
       }
     }
@@ -306,7 +386,22 @@ export default function VideoPlayer({
           setIsLoading(false);
           setIsPlaying(true);
         }}
-        onEnded={() => setIsPlaying(false)}
+        onPause={() => {
+          setIsPlaying(false);
+          if (onProgressUpdate && videoRef.current) {
+            const curr = videoRef.current.currentTime;
+            const totalDuration = videoRef.current.duration || 1;
+            const pct = Math.min(Math.round((curr / totalDuration) * 100), 100);
+            onProgressUpdate({ currentTime: curr, duration: totalDuration, progressPercent: pct });
+          }
+        }}
+        onEnded={() => {
+          setIsPlaying(false);
+          if (onProgressUpdate && videoRef.current) {
+            const totalDuration = videoRef.current.duration || 1;
+            onProgressUpdate({ currentTime: totalDuration, duration: totalDuration, progressPercent: 100 });
+          }
+        }}
         onError={() => {
           setIsLoading(false);
           setHasError(true);
@@ -324,8 +419,23 @@ export default function VideoPlayer({
         </div>
       )}
 
+      {/* Unsupported Browser Overlay */}
+      {isUnsupported && (
+        <div className="absolute inset-0 z-30 flex flex-col items-center justify-center bg-zinc-950/95 p-6 text-center space-y-4">
+          <div className="w-14 h-14 rounded-2xl bg-amber-500/20 border border-amber-500/40 text-amber-400 flex items-center justify-center">
+            <AlertCircle className="w-7 h-7" />
+          </div>
+          <div className="max-w-md space-y-2">
+            <h3 className="text-lg font-bold text-white">Browser Not Supported</h3>
+            <p className="text-xs text-zinc-400 leading-relaxed">
+              Your browser does not support HLS adaptive bitrate streaming. For the optimal CloudFront video streaming experience, please use Google Chrome, Apple Safari, Microsoft Edge, or Mozilla Firefox.
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* Playback Error Overlay */}
-      {hasError && (
+      {hasError && !isUnsupported && (
         <div className="absolute inset-0 z-25 flex flex-col items-center justify-center bg-zinc-950/90 p-6 text-center space-y-4">
           <div className="w-14 h-14 rounded-2xl bg-rose-500/20 border border-rose-500/40 text-rose-400 flex items-center justify-center">
             <AlertCircle className="w-7 h-7" />
@@ -333,14 +443,19 @@ export default function VideoPlayer({
           <div className="max-w-md space-y-1">
             <h3 className="text-lg font-bold text-white">Stream Playback Error</h3>
             <p className="text-xs text-zinc-400">
-              The media could not be loaded or the HLS manifest is temporarily unreachable.
+              {errorMessage || 'The media could not be loaded or the HLS manifest is temporarily unreachable through CloudFront.'}
             </p>
           </div>
           <button
             onClick={() => {
               setHasError(false);
+              setErrorMessage('');
               setIsLoading(true);
-              if (videoRef.current) {
+              retryCountRef.current = 0;
+              if (hlsRef.current) {
+                hlsRef.current.loadSource(videoSource);
+                hlsRef.current.startLoad();
+              } else if (videoRef.current) {
                 videoRef.current.load();
                 videoRef.current.play().catch(() => {});
               }
@@ -354,7 +469,7 @@ export default function VideoPlayer({
       )}
 
       {/* Center Big Play Button (Visible when paused and not loading/error) */}
-      {!isPlaying && !isLoading && !hasError && (
+      {!isPlaying && !isLoading && !hasError && !isUnsupported && (
         <div
           onClick={togglePlay}
           className="absolute inset-0 z-10 flex items-center justify-center bg-black/30 backdrop-blur-[2px] cursor-pointer"
@@ -377,7 +492,7 @@ export default function VideoPlayer({
           </h2>
           <div className="flex items-center gap-2">
             <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-purple-900/60 text-purple-200 border border-purple-500/40 backdrop-blur-md">
-              HLS • {selectedQuality.toUpperCase()}
+              HLS • {selectedQuality === 'auto' ? `AUTO ${activeResolution ? `(${activeResolution.toUpperCase()})` : ''}` : selectedQuality.toUpperCase()}
             </span>
           </div>
         </div>
@@ -496,7 +611,7 @@ export default function VideoPlayer({
                   </div>
 
                   <div className="space-y-1">
-                    {QUALITY_OPTIONS.map((opt) => {
+                    {availableQualities.map((opt) => {
                       const isSelected = selectedQuality === opt.id;
                       return (
                         <button

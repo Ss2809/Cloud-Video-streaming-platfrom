@@ -70,8 +70,6 @@ const register = async (req, res, next) => {
       success: true,
       message: `Verification code sent to ${cleanEmail}`,
       email: cleanEmail,
-      // Provide preview in development mode for easy API testing
-      ...(process.env.NODE_ENV === 'development' && { previewOtp: plainOtp }),
     });
   } catch (error) {
     next(error);
@@ -133,7 +131,6 @@ const login = async (req, res, next) => {
       success: true,
       message: `Login code sent to ${cleanEmail}`,
       email: cleanEmail,
-      ...(process.env.NODE_ENV === 'development' && { previewOtp: plainOtp }),
     });
   } catch (error) {
     next(error);
@@ -207,7 +204,6 @@ const sendOtp = async (req, res, next) => {
       message: `New verification code sent to ${cleanEmail}`,
       email: cleanEmail,
       type: otpType,
-      ...(process.env.NODE_ENV === 'development' && { previewOtp: plainOtp }),
     });
   } catch (error) {
     next(error);
@@ -332,10 +328,31 @@ const getMe = async (req, res, next) => {
   }
 };
 
+/**
+ * @desc    Get all registered users count and roster (Admin Only)
+ * @route   GET /api/auth/users
+ * @access  Private (Admin Only)
+ */
+const getUsers = async (req, res, next) => {
+  try {
+    const totalUsers = await User.countDocuments();
+    const users = await User.find().select('-__v').sort({ createdAt: -1 }).limit(100);
+    return res.status(200).json({
+      success: true,
+      total: totalUsers,
+      count: users.length,
+      users,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 module.exports = {
   register,
   login,
   sendOtp,
   verifyOtp,
   getMe,
+  getUsers,
 };

@@ -32,7 +32,7 @@ export default function CategoryCard({
   return (
     <button
       onClick={() => onSelect && onSelect(category.name)}
-      className={`group relative flex flex-col p-4 sm:p-5 rounded-2xl border text-left transition-all duration-300 w-full overflow-hidden ${
+      className={`group relative flex flex-col p-4 sm:p-5 rounded-2xl border text-left transition-all duration-300 w-full overflow-hidden cursor-pointer ${
         isSelected
           ? 'bg-purple-950/60 border-purple-500 shadow-lg shadow-purple-900/30 scale-[1.02]'
           : 'bg-zinc-900/70 hover:bg-zinc-900 border-zinc-800 hover:border-purple-500/50 hover:shadow-xl hover:shadow-purple-950/20'

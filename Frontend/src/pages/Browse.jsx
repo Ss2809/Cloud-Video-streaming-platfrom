@@ -40,13 +40,59 @@ const SORT_OPTIONS = [
 const ITEMS_PER_PAGE = 8;
 
 export default function Browse() {
-  const [searchQuery, setSearchQuery] = useState('');
-  const [selectedCategory, setSelectedCategory] = useState('All');
+  const [searchQuery, setSearchQuery] = useState(() => {
+    try {
+      const hash = window.location.hash;
+      const searchMatch = hash.match(/[?&]search=([^&]+)/);
+      if (searchMatch) {
+        return decodeURIComponent(searchMatch[1]);
+      }
+      const saved = localStorage.getItem('streamcloud_browse_search');
+      if (saved) {
+        localStorage.removeItem('streamcloud_browse_search');
+        return saved;
+      }
+    } catch {}
+    return '';
+  });
+
+  const [selectedCategory, setSelectedCategory] = useState(() => {
+    try {
+      const hash = window.location.hash;
+      const catMatch = hash.match(/[?&]category=([^&]+)/);
+      if (catMatch) {
+        const cat = decodeURIComponent(catMatch[1]);
+        if (CATEGORIES.includes(cat)) return cat;
+      }
+    } catch {}
+    return 'All';
+  });
+
   const [sortBy, setSortBy] = useState('latest');
   const [visibleCount, setVisibleCount] = useState(ITEMS_PER_PAGE);
   const [isLoading, setIsLoading] = useState(false);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [activeAlert, setActiveAlert] = useState(null);
+
+  // Sync search/category on hash changes
+  useEffect(() => {
+    const handleHash = () => {
+      const hash = window.location.hash;
+      const searchMatch = hash.match(/[?&]search=([^&]+)/);
+      if (searchMatch) {
+        setSearchQuery(decodeURIComponent(searchMatch[1]));
+      }
+      const catMatch = hash.match(/[?&]category=([^&]+)/);
+      if (catMatch) {
+        const cat = decodeURIComponent(catMatch[1]);
+        if (CATEGORIES.includes(cat)) {
+          setSelectedCategory(cat);
+        }
+      }
+    };
+    window.addEventListener('hashchange', handleHash);
+    return () => window.removeEventListener('hashchange', handleHash);
+  }, []);
 
   // Authentication State Integration
   const [currentUser, setCurrentUser] = useState(() => {

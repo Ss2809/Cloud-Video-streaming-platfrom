@@ -1,9 +1,9 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import Navbar from '../components/Navbar';
 import Footer from '../components/Footer';
 import AuthModal from '../components/AuthModal';
 import VideoCardSkeleton from '../components/VideoCardSkeleton';
-import { browseVideos, recommendedVideos } from '../data/mockData';
+import { videoService } from '../services/videoService';
 import {
   Clock,
   Bookmark,
@@ -13,146 +13,21 @@ import {
   X,
   Eye,
   CheckCircle2,
-  Film,
   Sparkles,
-  ArrowRight,
   RotateCcw,
   Compass,
+  LogIn,
+  AlertCircle,
 } from 'lucide-react';
-
-const INITIAL_HISTORY = [
-  {
-    id: 'hist-1',
-    title: 'CyberPulse: Nexus 2088',
-    creator: 'CyberPulse Studios',
-    thumbnailUrl:
-      'https://images.unsplash.com/photo-1578632767115-351597cf2477?q=80&w=800&auto=format&fit=crop',
-    category: 'Action',
-    duration: '2h 24m',
-    watchedDuration: '1h 38m',
-    progressPercent: 68,
-    lastWatched: '2 hours ago',
-  },
-  {
-    id: 'hist-2',
-    title: 'The Quantum Frontier: Deep Space',
-    creator: 'Nova Cosmos',
-    thumbnailUrl:
-      'https://images.unsplash.com/photo-1451187580459-43490279c0fa?q=80&w=800&auto=format&fit=crop',
-    category: 'Documentary',
-    duration: '52m',
-    watchedDuration: '24m',
-    progressPercent: 46,
-    lastWatched: 'Yesterday',
-  },
-  {
-    id: 'hist-3',
-    title: 'Speedshift: Tokyo Driftway',
-    creator: 'Redline Motorsport',
-    thumbnailUrl:
-      'https://images.unsplash.com/photo-1568605117036-5fe5e7bab0b7?q=80&w=800&auto=format&fit=crop',
-    category: 'Sports',
-    duration: '1h 35m',
-    watchedDuration: '1h 22m',
-    progressPercent: 86,
-    lastWatched: '3 days ago',
-  },
-  {
-    id: 'hist-4',
-    title: 'Neural Dreams: Consciousness in Code',
-    creator: 'Deep AI Academy',
-    thumbnailUrl:
-      'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?q=80&w=800&auto=format&fit=crop',
-    category: 'Education',
-    duration: '45m',
-    watchedDuration: '15m',
-    progressPercent: 33,
-    lastWatched: '5 days ago',
-  },
-];
-
-const INITIAL_WATCHLIST = [
-  {
-    id: 'wl-1',
-    title: 'Shadows of the Neon Abyss',
-    creator: 'CyberPulse Studios',
-    thumbnailUrl:
-      'https://images.unsplash.com/photo-1509198397868-475647b2a1e5?q=80&w=800&auto=format&fit=crop',
-    category: 'Action',
-    duration: '1h 48m',
-    views: '2.8M',
-    rating: '4.8',
-    addedAt: 'Aug 26, 2026',
-  },
-  {
-    id: 'wl-2',
-    title: 'Wild Serengeti: Untamed Earth',
-    creator: 'NatGeo Earth',
-    thumbnailUrl:
-      'https://images.unsplash.com/photo-1534177616072-ef7dc120449d?q=80&w=800&auto=format&fit=crop',
-    category: 'Documentary',
-    duration: '1h 40m',
-    views: '3.7M',
-    rating: '4.9',
-    addedAt: 'Aug 22, 2026',
-  },
-  {
-    id: 'wl-3',
-    title: 'Electronic Odyssey Live Festival',
-    creator: 'Harmonic Waves',
-    thumbnailUrl:
-      'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?q=80&w=800&auto=format&fit=crop',
-    category: 'Music',
-    duration: '2h 45m',
-    views: '1.9M',
-    rating: '4.7',
-    addedAt: 'Aug 28, 2026',
-  },
-  {
-    id: 'wl-4',
-    title: 'Champions League: Road to Glory',
-    creator: 'Championship Arena',
-    thumbnailUrl:
-      'https://images.unsplash.com/photo-1508098682722-e99c43a406b2?q=80&w=800&auto=format&fit=crop',
-    category: 'Sports',
-    duration: '1h 55m',
-    views: '5.6M',
-    rating: '4.8',
-    addedAt: 'Aug 19, 2026',
-  },
-  {
-    id: 'wl-5',
-    title: 'The Laugh Protocol: Stand-up Special',
-    creator: 'Laugh Riot Originals',
-    thumbnailUrl:
-      'https://images.unsplash.com/photo-1514306191717-452ec28c7814?q=80&w=800&auto=format&fit=crop',
-    category: 'Comedy',
-    duration: '1h 22m',
-    views: '2.1M',
-    rating: '4.5',
-    addedAt: 'Aug 29, 2026',
-  },
-  {
-    id: 'wl-6',
-    title: 'Quantum Computing Explained Simply',
-    creator: 'Tech Odyssey',
-    thumbnailUrl:
-      'https://images.unsplash.com/photo-1635070041078-e363dbe005cb?q=80&w=800&auto=format&fit=crop',
-    category: 'Education',
-    duration: '38m',
-    views: '1.1M',
-    rating: '4.9',
-    addedAt: 'Aug 30, 2026',
-  },
-];
 
 export default function WatchlistHistory({ onNavigateToWatch, onNavigateToBrowse }) {
   const [activeTab, setActiveTab] = useState('continueWatching'); // 'continueWatching' | 'watchlist'
-  const [historyList, setHistoryList] = useState(INITIAL_HISTORY);
-  const [watchlist, setWatchlist] = useState(INITIAL_WATCHLIST);
+  const [historyList, setHistoryList] = useState([]);
+  const [watchlist, setWatchlist] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('All');
-  const [isLoading, setIsLoading] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+  const [fetchError, setFetchError] = useState(null);
   const [activeAlert, setActiveAlert] = useState(null);
 
   // Auth state
@@ -167,6 +42,49 @@ export default function WatchlistHistory({ onNavigateToWatch, onNavigateToBrowse
   const [authModalOpen, setAuthModalOpen] = useState(false);
   const [authModalMode, setAuthModalMode] = useState('signin');
 
+  // Load History & Watchlist data from backend API
+  const loadLibraryData = useCallback(async () => {
+    const token = localStorage.getItem('streamcloud_token');
+    if (!token) {
+      setHistoryList([]);
+      setWatchlist([]);
+      setIsLoading(false);
+      return;
+    }
+
+    setIsLoading(true);
+    setFetchError(null);
+
+    try {
+      const [histRes, wlRes] = await Promise.allSettled([
+        videoService.getHistory(),
+        videoService.getWatchlist(),
+      ]);
+
+      if (histRes.status === 'fulfilled' && histRes.value?.success) {
+        setHistoryList(histRes.value.history || []);
+      } else if (histRes.status === 'rejected') {
+        console.warn('[WatchlistHistory] History request failed:', histRes.reason?.message);
+      }
+
+      if (wlRes.status === 'fulfilled' && wlRes.value?.success) {
+        setWatchlist(wlRes.value.watchlist || []);
+      } else if (wlRes.status === 'rejected') {
+        console.warn('[WatchlistHistory] Watchlist request failed:', wlRes.reason?.message);
+      }
+    } catch (err) {
+      console.error('[WatchlistHistory] Error fetching library:', err);
+      setFetchError('Unable to connect to the streaming platform. Please try again.');
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  // Fetch data on initial mount and when authentication status changes
+  useEffect(() => {
+    loadLibraryData();
+  }, [loadLibraryData, currentUser]);
+
   const handleOpenAuth = (mode = 'signin') => {
     setAuthModalMode(mode);
     setAuthModalOpen(true);
@@ -177,16 +95,20 @@ export default function WatchlistHistory({ onNavigateToWatch, onNavigateToBrowse
     localStorage.setItem('streamcloud_user', JSON.stringify(userData));
     setActiveAlert(`Signed in as ${userData.name}!`);
     setTimeout(() => setActiveAlert(null), 3500);
+    loadLibraryData();
   };
 
   const handleLogout = () => {
     setCurrentUser(null);
     localStorage.removeItem('streamcloud_user');
+    localStorage.removeItem('streamcloud_token');
+    setHistoryList([]);
+    setWatchlist([]);
     setActiveAlert('Signed out successfully.');
     setTimeout(() => setActiveAlert(null), 3500);
   };
 
-  // Tab switch with simulated skeleton loader
+  // Tab switch with skeleton loader animation
   const handleTabSwitch = (tab) => {
     setActiveTab(tab);
     setSearchQuery('');
@@ -195,40 +117,69 @@ export default function WatchlistHistory({ onNavigateToWatch, onNavigateToBrowse
     setTimeout(() => setIsLoading(false), 240);
   };
 
-  // Remove from History
-  const handleRemoveFromHistory = (id, title) => {
-    setHistoryList((prev) => prev.filter((item) => item.id !== id));
+  // Remove single video from History
+  const handleRemoveFromHistory = async (id, title) => {
+    setHistoryList((prev) => prev.filter((item) => item.id !== id && item.videoId !== id));
     setActiveAlert(`Removed "${title}" from Watch History.`);
     setTimeout(() => setActiveAlert(null), 3500);
+
+    try {
+      await videoService.removeFromHistory(id);
+    } catch (err) {
+      console.warn('[WatchlistHistory] Error removing history item:', err.message);
+    }
   };
 
   // Clear Entire History
-  const handleClearHistory = () => {
+  const handleClearHistory = async () => {
     setHistoryList([]);
     setActiveAlert('All watch history has been cleared.');
     setTimeout(() => setActiveAlert(null), 3500);
+
+    try {
+      await videoService.clearHistory();
+    } catch (err) {
+      console.warn('[WatchlistHistory] Error clearing history:', err.message);
+    }
   };
 
-  // Remove from Watchlist
-  const handleRemoveFromWatchlist = (id, title) => {
-    setWatchlist((prev) => prev.filter((item) => item.id !== id));
+  // Remove single video from Watchlist
+  const handleRemoveFromWatchlist = async (id, title) => {
+    setWatchlist((prev) => prev.filter((item) => item.id !== id && item.videoId !== id));
     setActiveAlert(`Removed "${title}" from Watchlist.`);
     setTimeout(() => setActiveAlert(null), 3500);
+
+    try {
+      await videoService.removeFromWatchlist(id);
+    } catch (err) {
+      console.warn('[WatchlistHistory] Error removing watchlist item:', err.message);
+    }
   };
 
   // Clear Entire Watchlist
-  const handleClearWatchlist = () => {
+  const handleClearWatchlist = async () => {
     setWatchlist([]);
     setActiveAlert('All watchlist items have been cleared.');
     setTimeout(() => setActiveAlert(null), 3500);
+
+    try {
+      await videoService.clearWatchlist();
+    } catch (err) {
+      console.warn('[WatchlistHistory] Error clearing watchlist:', err.message);
+    }
   };
 
   // Continue Watching / Watch Now action
   const handleWatchVideo = (video) => {
+    const targetId = video.videoId || video.id;
+    if (targetId) {
+      try {
+        localStorage.setItem('streamcloud_active_video_id', targetId);
+      } catch {}
+      window.location.hash = `#watch?id=${targetId}`;
+    }
     if (onNavigateToWatch) {
-      onNavigateToWatch(video.id);
-    } else {
-      window.location.hash = '#watch';
+      onNavigateToWatch(targetId);
     }
   };
 
@@ -237,12 +188,12 @@ export default function WatchlistHistory({ onNavigateToWatch, onNavigateToBrowse
     return historyList.filter((item) => {
       const matchesSearch =
         searchQuery === '' ||
-        item.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        item.creator.toLowerCase().includes(searchQuery.toLowerCase());
+        item.title?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        item.creator?.toLowerCase().includes(searchQuery.toLowerCase());
 
       const matchesCat =
         selectedCategory === 'All' ||
-        item.category.toLowerCase() === selectedCategory.toLowerCase();
+        item.category?.toLowerCase() === selectedCategory.toLowerCase();
 
       return matchesSearch && matchesCat;
     });
@@ -253,12 +204,12 @@ export default function WatchlistHistory({ onNavigateToWatch, onNavigateToBrowse
     return watchlist.filter((item) => {
       const matchesSearch =
         searchQuery === '' ||
-        item.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        item.creator.toLowerCase().includes(searchQuery.toLowerCase());
+        item.title?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        item.creator?.toLowerCase().includes(searchQuery.toLowerCase());
 
       const matchesCat =
         selectedCategory === 'All' ||
-        item.category.toLowerCase() === selectedCategory.toLowerCase();
+        item.category?.toLowerCase() === selectedCategory.toLowerCase();
 
       return matchesSearch && matchesCat;
     });
@@ -453,7 +404,7 @@ export default function WatchlistHistory({ onNavigateToWatch, onNavigateToBrowse
                       </span>
 
                       {/* Last Watched Tag */}
-                      <span className="absolute top-2.5 right-2.5 px-2 py-0.5 rounded bg-black/75 text-[10px] font-medium text-zinc-300">
+                      <span className="absolute top-2.5 right-2.5 px-2.5 py-0.5 rounded bg-black/75 text-[10px] font-medium text-zinc-300">
                         {item.lastWatched}
                       </span>
 
@@ -511,6 +462,38 @@ export default function WatchlistHistory({ onNavigateToWatch, onNavigateToBrowse
                     </div>
                   </div>
                 ))}
+              </div>
+            ) : !currentUser ? (
+              /* Signed Out Empty State for History */
+              <div className="py-16 text-center rounded-3xl bg-zinc-900/40 border border-zinc-800/80 space-y-4">
+                <div className="w-16 h-16 rounded-2xl bg-purple-950/50 border border-purple-800/40 text-purple-400 mx-auto flex items-center justify-center">
+                  <Clock className="w-8 h-8" />
+                </div>
+                <div className="max-w-md mx-auto space-y-1">
+                  <h3 className="text-lg font-bold text-white">Sign In to View Watch History</h3>
+                  <p className="text-xs text-zinc-400">
+                    Track your viewing progress, pick up right where you left off, and sync across all your devices.
+                  </p>
+                </div>
+                <div className="flex flex-wrap items-center justify-center gap-3 pt-2">
+                  <button
+                    onClick={() => handleOpenAuth('signin')}
+                    className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs sm:text-sm font-semibold bg-purple-600 hover:bg-purple-500 text-white shadow-lg shadow-purple-600/30 transition-colors cursor-pointer"
+                  >
+                    <LogIn className="w-4 h-4" />
+                    <span>Sign In</span>
+                  </button>
+                  <button
+                    onClick={() => {
+                      if (onNavigateToBrowse) onNavigateToBrowse();
+                      else window.location.hash = '#browse';
+                    }}
+                    className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs sm:text-sm font-semibold bg-zinc-800 hover:bg-zinc-700 text-zinc-200 border border-zinc-700/80 transition-colors cursor-pointer"
+                  >
+                    <Compass className="w-4 h-4 text-purple-400" />
+                    <span>Browse Catalog</span>
+                  </button>
+                </div>
               </div>
             ) : (
               /* 6. Empty State for Continue Watching */
@@ -619,6 +602,38 @@ export default function WatchlistHistory({ onNavigateToWatch, onNavigateToBrowse
                     </div>
                   </div>
                 ))}
+              </div>
+            ) : !currentUser ? (
+              /* Signed Out Empty State for Watchlist */
+              <div className="py-16 text-center rounded-3xl bg-zinc-900/40 border border-zinc-800/80 space-y-4">
+                <div className="w-16 h-16 rounded-2xl bg-purple-950/50 border border-purple-800/40 text-purple-400 mx-auto flex items-center justify-center">
+                  <Bookmark className="w-8 h-8" />
+                </div>
+                <div className="max-w-md mx-auto space-y-1">
+                  <h3 className="text-lg font-bold text-white">Sign In to View Watchlist</h3>
+                  <p className="text-xs text-zinc-400">
+                    Save movies and shows you want to watch later, and access them seamlessly on any device.
+                  </p>
+                </div>
+                <div className="flex flex-wrap items-center justify-center gap-3 pt-2">
+                  <button
+                    onClick={() => handleOpenAuth('signin')}
+                    className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs sm:text-sm font-semibold bg-purple-600 hover:bg-purple-500 text-white shadow-lg shadow-purple-600/30 transition-colors cursor-pointer"
+                  >
+                    <LogIn className="w-4 h-4" />
+                    <span>Sign In</span>
+                  </button>
+                  <button
+                    onClick={() => {
+                      if (onNavigateToBrowse) onNavigateToBrowse();
+                      else window.location.hash = '#browse';
+                    }}
+                    className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs sm:text-sm font-semibold bg-zinc-800 hover:bg-zinc-700 text-zinc-200 border border-zinc-700/80 transition-colors cursor-pointer"
+                  >
+                    <Compass className="w-4 h-4 text-purple-400" />
+                    <span>Browse Catalog</span>
+                  </button>
+                </div>
               </div>
             ) : (
               /* 6. Empty State for Watchlist */

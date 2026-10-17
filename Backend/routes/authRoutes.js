@@ -6,6 +6,7 @@ const {
   sendOtp,
   verifyOtp,
   getMe,
+  getUsers,
 } = require('../controllers/authController');
 const { protect, authorizeAdmin } = require('../middleware/authMiddleware');
 
@@ -18,7 +19,8 @@ router.post('/verify-otp', verifyOtp);
 // Protected User Route
 router.get('/me', protect, getMe);
 
-// Protected Admin-Only Route (Verification of Admin Middleware)
+// Protected Admin-Only Routes
+router.get('/users', protect, authorizeAdmin, getUsers);
 router.get('/admin-check', protect, authorizeAdmin, (req, res) => {
   res.status(200).json({
     success: true,

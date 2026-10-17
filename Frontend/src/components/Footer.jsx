@@ -29,6 +29,30 @@ export default function Footer() {
     ],
   };
 
+  const handleLinkClick = (e, href) => {
+    if (href === '#home') {
+      e.preventDefault();
+      window.location.hash = '#home';
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    } else if (href === '#browse') {
+      e.preventDefault();
+      window.location.hash = '#browse';
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    } else if (href === '#categories') {
+      e.preventDefault();
+      window.location.hash = '#categories';
+      setTimeout(() => {
+        document.getElementById('categories')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }, 80);
+    } else if (href === '#trending') {
+      e.preventDefault();
+      window.location.hash = '#trending';
+      setTimeout(() => {
+        document.getElementById('trending')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }, 80);
+    }
+  };
+
   return (
     <footer className="bg-zinc-950 border-t border-zinc-800/80 pt-16 pb-12 mt-16 text-zinc-400">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -36,7 +60,11 @@ export default function Footer() {
         <div className="grid grid-cols-2 md:grid-cols-5 gap-8 pb-12 border-b border-zinc-800/60">
           {/* Brand Info Column */}
           <div className="col-span-2 space-y-4">
-            <a href="#home" className="flex items-center gap-2.5">
+            <a
+              href="#home"
+              onClick={(e) => handleLinkClick(e, '#home')}
+              className="flex items-center gap-2.5 cursor-pointer"
+            >
               <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-purple-600 to-indigo-500 flex items-center justify-center shadow-lg shadow-purple-600/30">
                 <Play className="w-4 h-4 text-white fill-current ml-0.5" />
               </div>
@@ -100,7 +128,8 @@ export default function Footer() {
                 <li key={link.name}>
                   <a
                     href={link.href}
-                    className="hover:text-purple-400 transition-colors"
+                    onClick={(e) => handleLinkClick(e, link.href)}
+                    className="hover:text-purple-400 transition-colors cursor-pointer"
                   >
                     {link.name}
                   </a>

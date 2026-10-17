@@ -50,26 +50,37 @@ const sendOtpEmail = async ({ to, otp, type = 'login', name = 'Viewer' }) => {
   console.log(`======================================================\n`);
 
   // Check if SMTP is configured
-  if (process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS) {
+  const host = process.env.SMTP_HOST || (process.env.SMTP_USER && process.env.SMTP_USER.includes('@gmail.com') ? 'smtp.gmail.com' : null);
+  const user = process.env.SMTP_USER ? process.env.SMTP_USER.trim() : null;
+  const pass = process.env.SMTP_PASS ? process.env.SMTP_PASS.replace(/\s+/g, '') : null;
+  const port = parseInt(process.env.SMTP_PORT || (host === 'smtp.gmail.com' ? '465' : '587'), 10);
+  const secure = port === 465;
+
+  if (host && user && pass) {
     try {
       const transporter = nodemailer.createTransport({
-        host: process.env.SMTP_HOST,
-        port: parseInt(process.env.SMTP_PORT || '587', 10),
-        secure: process.env.SMTP_PORT === '465',
+        host,
+        port,
+        secure,
         auth: {
-          user: process.env.SMTP_USER,
-          pass: process.env.SMTP_PASS,
+          user,
+          pass,
         },
+        connectionTimeout: 15000,
+        socketTimeout: 15000,
       });
 
-      await transporter.sendMail({
-        from: process.env.SMTP_FROM || '"StreamCloud" <noreply@streamcloud.io>',
+      const fromAddress = process.env.SMTP_FROM || `"StreamCloud Video" <${user}>`;
+
+      const info = await transporter.sendMail({
+        from: fromAddress,
         to,
         subject,
         html: htmlContent,
       });
 
-      return { success: true, mode: 'smtp' };
+      console.log(`[EmailService] OTP email sent successfully to ${to} via SMTP (Message ID: ${info.messageId})`);
+      return { success: true, mode: 'smtp', messageId: info.messageId };
     } catch (error) {
       console.error(`[EmailService] Failed to send via SMTP: ${error.message}`);
       // Don't fail the request completely if console has logged it during dev

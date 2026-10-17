@@ -69,11 +69,34 @@ export default function Home() {
   };
 
   const handlePlayVideo = (video) => {
+    const vidId = (video && (video.id || video._id)) || '6ac7a809bfbea0f11934b1f9';
     try {
-      localStorage.setItem('streamcloud_active_video_id', video.id || video._id);
+      localStorage.setItem('streamcloud_active_video_id', vidId);
     } catch {}
-    window.location.hash = `#watch?id=${video.id || video._id}`;
+    window.location.hash = `#watch?id=${vidId}`;
   };
+
+  // Smooth scroll to sections when hash is #categories, #trending, or #home
+  useEffect(() => {
+    const handleHashScroll = () => {
+      const hash = window.location.hash;
+      if (hash === '#categories') {
+        setTimeout(() => {
+          document.getElementById('categories')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }, 80);
+      } else if (hash === '#trending') {
+        setTimeout(() => {
+          document.getElementById('trending')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }, 80);
+      } else if (hash === '#home' || hash === '') {
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      }
+    };
+
+    handleHashScroll();
+    window.addEventListener('hashchange', handleHashScroll);
+    return () => window.removeEventListener('hashchange', handleHashScroll);
+  }, []);
 
   // Filter trending videos based on search and selected category
   const filteredTrending = useMemo(() => {
@@ -128,7 +151,11 @@ export default function Home() {
       {/* Main Content Area */}
       <main className="flex-grow space-y-4 md:space-y-8">
         {/* 2. Hero Section */}
-        <Hero movie={heroMovie} />
+        <Hero
+          movie={heroMovie}
+          onPlayVideo={handlePlayVideo}
+          onMoreInfo={handlePlayVideo}
+        />
 
         {/* Search / Filter notification status if filtering is active */}
         {(searchQuery || selectedCategory) && (
@@ -164,18 +191,19 @@ export default function Home() {
         )}
 
         {/* 3. "Trending Now" Section */}
-        <div id="trending">
+        <div id="trending" className="scroll-mt-24">
           <VideoSection
             title="Trending Now"
             subtitle="Most watched titles across the global network this week"
             icon={Flame}
             videos={filteredTrending.length > 0 ? filteredTrending : trendingVideos}
             onPlayVideo={handlePlayVideo}
+            viewAllLink="#browse"
           />
         </div>
 
         {/* 4. "Categories" Section */}
-        <section id="categories" className="py-8 sm:py-10">
+        <section id="categories" className="py-8 sm:py-10 scroll-mt-24">
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
             <div className="flex items-end justify-between mb-6">
               <div className="space-y-1">
@@ -195,7 +223,7 @@ export default function Home() {
               {selectedCategory && (
                 <button
                   onClick={() => setSelectedCategory(null)}
-                  className="text-xs sm:text-sm font-medium text-purple-400 hover:text-purple-300"
+                  className="text-xs sm:text-sm font-medium text-purple-400 hover:text-purple-300 cursor-pointer"
                 >
                   Clear Selection
                 </button>
@@ -217,13 +245,14 @@ export default function Home() {
         </section>
 
         {/* 5. "Recommended for You" Section */}
-        <div id="browse">
+        <div id="recommended" className="scroll-mt-24">
           <VideoSection
             title="Recommended for You"
             subtitle="Curated by intelligent recommendation engines based on trending popularity"
             icon={Sparkles}
             videos={filteredRecommended.length > 0 ? filteredRecommended : recommendedVideos}
             onPlayVideo={handlePlayVideo}
+            viewAllLink="#browse"
           />
         </div>
       </main>

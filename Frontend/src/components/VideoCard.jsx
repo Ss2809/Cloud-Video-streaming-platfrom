@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Play, Eye, Clock, Star, Plus, Check } from 'lucide-react';
+import { videoService } from '../services/videoService';
 
 export default function VideoCard({ video, onPlay, layout = 'carousel', className = '' }) {
   const [inWatchlist, setInWatchlist] = useState(false);
@@ -66,9 +67,25 @@ export default function VideoCard({ video, onPlay, layout = 'carousel', classNam
             
             {/* Quick Watchlist action */}
             <button
-              onClick={(e) => {
+              onClick={async (e) => {
                 e.stopPropagation();
-                setInWatchlist(!inWatchlist);
+                const nextState = !inWatchlist;
+                setInWatchlist(nextState);
+                const vidId = video.id || video._id;
+                if (vidId && typeof vidId === 'string' && vidId.length === 24) {
+                  try {
+                    const token = localStorage.getItem('streamcloud_token');
+                    if (token) {
+                      if (nextState) {
+                        await videoService.addToWatchlist(vidId);
+                      } else {
+                        await videoService.removeFromWatchlist(vidId);
+                      }
+                    }
+                  } catch (err) {
+                    console.warn('Watchlist toggle error:', err.message);
+                  }
+                }
               }}
               title={inWatchlist ? "Remove from List" : "Add to List"}
               className="text-zinc-400 hover:text-white p-1 rounded-full hover:bg-zinc-800 transition-colors cursor-pointer flex-shrink-0"

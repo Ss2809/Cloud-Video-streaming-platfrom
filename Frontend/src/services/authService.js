@@ -73,6 +73,15 @@ export const authService = {
   },
 
   /**
+   * Get all users list and total count (Admin only)
+   * GET /api/auth/users
+   */
+  async getUsers() {
+    const response = await apiClient.get('/users');
+    return response.data;
+  },
+
+  /**
    * Sign out and clear stored session
    */
   logout() {

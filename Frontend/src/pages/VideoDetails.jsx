@@ -270,6 +270,21 @@ export default function VideoDetails({ initialVideoId = null }) {
     return () => window.removeEventListener('hashchange', handleHashChange);
   }, [resolveTargetId, loadVideo]);
 
+  // Watchlist status check on video / user change
+  useEffect(() => {
+    let isMounted = true;
+    if (currentVideo?.id && currentUser) {
+      videoService.checkWatchlist(currentVideo.id).then((inWl) => {
+        if (isMounted) setInWatchlist(inWl);
+      });
+    } else {
+      setInWatchlist(false);
+    }
+    return () => {
+      isMounted = false;
+    };
+  }, [currentVideo?.id, currentUser]);
+
   // Record a view atomically when the user starts video playback
   const handleRecordView = async () => {
     if (!currentVideo?.id || hasRecordedViewRef.current) return;
@@ -288,14 +303,64 @@ export default function VideoDetails({ initialVideoId = null }) {
     }
   };
 
-  // Watchlist action
-  const toggleWatchlist = () => {
-    setInWatchlist(!inWatchlist);
-    setActiveAlert(
-      !inWatchlist
-        ? `"${currentVideo.title}" added to your Watchlist.`
-        : `"${currentVideo.title}" removed from Watchlist.`
-    );
+  // Save playback progress to user history
+  const handleProgressUpdate = useCallback(async ({ currentTime, duration, progressPercent }) => {
+    const token = localStorage.getItem('streamcloud_token');
+    if (!token || !currentVideo?.id) return;
+
+    const minutes = Math.floor(currentTime / 60);
+    const hours = Math.floor(minutes / 60);
+    const remMin = minutes % 60;
+    const watchedDurationStr = hours > 0 ? `${hours}h ${remMin}m` : `${remMin}m`;
+
+    try {
+      await videoService.saveHistoryProgress({
+        videoId: currentVideo.id,
+        progressPercent: Math.round(progressPercent),
+        watchedDuration: watchedDurationStr,
+      });
+    } catch (err) {
+      console.warn('[VideoDetails] Could not save playback history:', err.message);
+    }
+  }, [currentVideo?.id]);
+
+  // Handle play start (records view + initial history checkpoint)
+  const handlePlayStart = () => {
+    handleRecordView();
+    const token = localStorage.getItem('streamcloud_token');
+    if (token && currentVideo?.id) {
+      videoService
+        .saveHistoryProgress({
+          videoId: currentVideo.id,
+          progressPercent: 2,
+          watchedDuration: '1m',
+        })
+        .catch(() => {});
+    }
+  };
+
+  // Watchlist toggle action connected to real API
+  const toggleWatchlist = async () => {
+    if (!currentUser) {
+      handleOpenAuth('signin');
+      return;
+    }
+    if (!currentVideo?.id) return;
+
+    const willBeIn = !inWatchlist;
+    setInWatchlist(willBeIn);
+    try {
+      if (willBeIn) {
+        await videoService.addToWatchlist(currentVideo.id);
+        setActiveAlert(`"${currentVideo.title}" added to your Watchlist.`);
+      } else {
+        await videoService.removeFromWatchlist(currentVideo.id);
+        setActiveAlert(`"${currentVideo.title}" removed from Watchlist.`);
+      }
+    } catch (err) {
+      console.warn('[VideoDetails] Error toggling watchlist:', err.message);
+      setActiveAlert(`"${currentVideo.title}" ${willBeIn ? 'added to' : 'removed from'} Watchlist.`);
+    }
     setTimeout(() => setActiveAlert(null), 3500);
   };
 
@@ -383,7 +448,8 @@ export default function VideoDetails({ initialVideoId = null }) {
                   posterUrl={currentVideo.thumbnailUrl}
                   title={currentVideo.title}
                   autoPlay={false}
-                  onPlay={handleRecordView}
+                  onPlay={handlePlayStart}
+                  onProgressUpdate={handleProgressUpdate}
                 />
               </div>
 

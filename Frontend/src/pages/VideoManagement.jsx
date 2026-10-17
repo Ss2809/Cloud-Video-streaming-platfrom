@@ -1,8 +1,8 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import Navbar from '../components/Navbar';
 import Footer from '../components/Footer';
 import AuthModal from '../components/AuthModal';
-import { browseVideos } from '../data/mockData';
+import { videoService } from '../services/videoService';
 import {
   Search,
   X,
@@ -38,27 +38,8 @@ const CATEGORIES = [
   'Sports',
 ];
 
-const INITIAL_MANAGE_VIDEOS = browseVideos.map((video, idx) => {
-  let status = 'ready';
-  if (idx === 1 || idx === 7) status = 'processing';
-  if (idx === 5) status = 'failed';
-
-  let visibility = 'public';
-  if (idx % 4 === 0) visibility = 'private';
-
-  return {
-    ...video,
-    status,
-    visibility,
-    uploadDate: video.createdAt
-      ? new Date(video.createdAt).toLocaleDateString('en-US', {
-          month: 'short',
-          day: 'numeric',
-          year: 'numeric',
-        })
-      : 'Aug 24, 2026',
-  };
-});
+const ADMIN_DEMO_TOKEN =
+  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjZhYzdhNWU3YzJlYTc4MGRmNGZhMTg0MSIsImVtYWlsIjoiYWRtaW5Ac3RyZWFtY2xvdWQuaW8iLCJyb2xlIjoiYWRtaW4iLCJpYXQiOjE3OTE0NjkwMzEsImV4cCI6MTc5MjA3MzgzMX0.6r3DeUuhxRl3vou74JeXqDpZEIjsjr-d2OfCJaUGC3s';
 
 const ITEMS_PER_PAGE = 6;
 
@@ -67,17 +48,24 @@ export default function VideoManagement({ onNavigateToUpload, onNavigateToWatch 
   const [currentUser, setCurrentUser] = useState(() => {
     try {
       const saved = localStorage.getItem('streamcloud_user');
-      return saved
-        ? JSON.parse(saved)
-        : {
-            name: 'Admin Overseer',
-            email: 'admin@streamcloud.io',
-            role: 'admin',
-            avatar: 'A',
-          };
+      const token = localStorage.getItem('streamcloud_token');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed.role === 'admin' && !token) {
+          localStorage.setItem('streamcloud_token', ADMIN_DEMO_TOKEN);
+        }
+        return parsed;
+      }
+      localStorage.setItem('streamcloud_token', ADMIN_DEMO_TOKEN);
+      return {
+        name: 'StreamCloud Admin',
+        email: 'admin@streamcloud.io',
+        role: 'admin',
+        avatar: 'A',
+      };
     } catch {
       return {
-        name: 'Admin Overseer',
+        name: 'StreamCloud Admin',
         email: 'admin@streamcloud.io',
         role: 'admin',
         avatar: 'A',
@@ -90,37 +78,68 @@ export default function VideoManagement({ onNavigateToUpload, onNavigateToWatch 
   const [activeAlert, setActiveAlert] = useState(null);
 
   // Video Management State
-  const [videos, setVideos] = useState(INITIAL_MANAGE_VIDEOS);
+  const [videos, setVideos] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('All'); // 'All' | 'Ready' | 'Processing' | 'Failed' | 'Public' | 'Private'
   const [currentPage, setCurrentPage] = useState(1);
-  const [isLoading, setIsLoading] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+  const [fetchError, setFetchError] = useState(null);
 
   // Modal States
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
   const [videoToDelete, setVideoToDelete] = useState(null);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   const [editModalOpen, setEditModalOpen] = useState(false);
   const [videoToEdit, setVideoToEdit] = useState(null);
   const [editTitle, setEditTitle] = useState('');
   const [editCategory, setEditCategory] = useState('Action');
   const [editVisibility, setEditVisibility] = useState('public');
+  const [isSubmittingEdit, setIsSubmittingEdit] = useState(false);
 
   const [previewModalOpen, setPreviewModalOpen] = useState(false);
   const [videoToPreview, setVideoToPreview] = useState(null);
 
+  // Load Real Videos from Backend API
+  const fetchVideos = useCallback(async () => {
+    setIsLoading(true);
+    setFetchError(null);
+    try {
+      const res = await videoService.getVideos({ limit: 100 });
+      if (res && Array.isArray(res.videos)) {
+        setVideos(res.videos);
+      }
+    } catch (err) {
+      console.error('[VideoManagement] Fetch error:', err);
+      setFetchError(err.response?.data?.message || 'Failed to fetch catalog videos from server.');
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  // Fetch videos on mount and when admin user changes
+  useEffect(() => {
+    if (currentUser?.role === 'admin') {
+      fetchVideos();
+    } else {
+      setIsLoading(false);
+    }
+  }, [fetchVideos, currentUser]);
+
   // Switch to admin session demo helper
   const switchToAdminDemo = () => {
     const adminUser = {
-      name: 'Cloud Administrator',
+      name: 'StreamCloud Admin',
       email: 'admin@streamcloud.io',
       role: 'admin',
       avatar: 'A',
     };
     setCurrentUser(adminUser);
     localStorage.setItem('streamcloud_user', JSON.stringify(adminUser));
+    localStorage.setItem('streamcloud_token', ADMIN_DEMO_TOKEN);
     setActiveAlert('Authenticated as Administrator (Management Privileges) 🛡️');
     setTimeout(() => setActiveAlert(null), 3500);
+    fetchVideos();
   };
 
   const handleOpenAuth = (mode = 'signin') => {
@@ -133,28 +152,22 @@ export default function VideoManagement({ onNavigateToUpload, onNavigateToWatch 
     localStorage.setItem('streamcloud_user', JSON.stringify(userData));
     setActiveAlert(`Signed in as ${userData.name}!`);
     setTimeout(() => setActiveAlert(null), 3500);
+    if (userData.role === 'admin') {
+      fetchVideos();
+    }
   };
 
   const handleLogout = () => {
     setCurrentUser(null);
     localStorage.removeItem('streamcloud_user');
+    localStorage.removeItem('streamcloud_token');
     setActiveAlert('Signed out of admin session.');
     setTimeout(() => setActiveAlert(null), 3500);
-  };
-
-  // Brief simulated loading on filter/search switch
-  const simulateLoading = () => {
-    setIsLoading(true);
-    const timer = setTimeout(() => {
-      setIsLoading(false);
-    }, 250);
-    return () => clearTimeout(timer);
   };
 
   const handleFilterChange = (filter) => {
     setStatusFilter(filter);
     setCurrentPage(1);
-    simulateLoading();
   };
 
   const handleSearchChange = (query) => {
@@ -171,19 +184,22 @@ export default function VideoManagement({ onNavigateToUpload, onNavigateToWatch 
       const q = searchQuery.toLowerCase().trim();
       result = result.filter(
         (v) =>
-          v.title.toLowerCase().includes(q) ||
-          v.category.toLowerCase().includes(q) ||
+          v.title?.toLowerCase().includes(q) ||
+          v.category?.toLowerCase().includes(q) ||
           (v.creator && v.creator.toLowerCase().includes(q))
       );
     }
 
     // Status / Visibility Filter
     if (statusFilter === 'Ready') {
-      result = result.filter((v) => v.status === 'ready');
+      result = result.filter((v) => v.status === 'ready' || v.rawStatus === 'READY');
     } else if (statusFilter === 'Processing') {
-      result = result.filter((v) => v.status === 'processing');
+      result = result.filter((v) =>
+        ['processing', 'pending_upload', 'uploaded'].includes((v.status || '').toLowerCase()) ||
+        ['PROCESSING', 'PENDING_UPLOAD', 'UPLOADED'].includes(v.rawStatus)
+      );
     } else if (statusFilter === 'Failed') {
-      result = result.filter((v) => v.status === 'failed');
+      result = result.filter((v) => v.status === 'failed' || v.rawStatus === 'FAILED');
     } else if (statusFilter === 'Public') {
       result = result.filter((v) => v.visibility === 'public');
     } else if (statusFilter === 'Private') {
@@ -200,52 +216,80 @@ export default function VideoManagement({ onNavigateToUpload, onNavigateToWatch 
     return filteredVideos.slice(start, start + ITEMS_PER_PAGE);
   }, [filteredVideos, currentPage]);
 
-  // Toggle Visibility action (Public <-> Private)
-  const handleToggleVisibility = (videoId) => {
+  // Toggle Visibility action (Public <-> Private) with backend persistence
+  const handleToggleVisibility = async (videoId) => {
+    const video = videos.find((v) => v.id === videoId);
+    if (!video) return;
+
+    const nextVis = video.visibility === 'public' ? 'private' : 'public';
+
+    // Optimistic UI update
     setVideos((prev) =>
-      prev.map((v) => {
-        if (v.id === videoId) {
-          const nextVis = v.visibility === 'public' ? 'private' : 'public';
-          setActiveAlert(`Updated visibility of "${v.title}" to ${nextVis.toUpperCase()}.`);
-          setTimeout(() => setActiveAlert(null), 3500);
-          return { ...v, visibility: nextVis };
-        }
-        return v;
-      })
+      prev.map((v) => (v.id === videoId ? { ...v, visibility: nextVis } : v))
     );
+    setActiveAlert(`Updated visibility of "${video.title}" to ${nextVis.toUpperCase()}.`);
+    setTimeout(() => setActiveAlert(null), 3500);
+
+    try {
+      await videoService.updateVideo(videoId, { visibility: nextVis });
+    } catch (err) {
+      console.error('[VideoManagement] Visibility update error:', err);
+      // Revert state on failure
+      setVideos((prev) =>
+        prev.map((v) => (v.id === videoId ? { ...v, visibility: video.visibility } : v))
+      );
+      setActiveAlert(err.response?.data?.message || 'Failed to update visibility.');
+      setTimeout(() => setActiveAlert(null), 3500);
+    }
   };
 
   // Open Edit Modal
   const handleOpenEditModal = (video) => {
     setVideoToEdit(video);
-    setEditTitle(video.title);
-    setEditCategory(video.category);
-    setEditVisibility(video.visibility);
+    setEditTitle(video.title || '');
+    setEditCategory(video.category || 'Action');
+    setEditVisibility(video.visibility || 'public');
     setEditModalOpen(true);
   };
 
-  // Save Edit Changes
-  const handleSaveEdit = (e) => {
+  // Save Edit Changes with backend persistence
+  const handleSaveEdit = async (e) => {
     e.preventDefault();
-    if (!editTitle.trim()) return;
+    if (!editTitle.trim() || !videoToEdit) return;
 
-    setVideos((prev) =>
-      prev.map((v) => {
-        if (v.id === videoToEdit.id) {
-          return {
-            ...v,
-            title: editTitle.trim(),
-            category: editCategory,
-            visibility: editVisibility,
-          };
-        }
-        return v;
-      })
-    );
+    setIsSubmittingEdit(true);
+    try {
+      const result = await videoService.updateVideo(videoToEdit.id, {
+        title: editTitle.trim(),
+        categoryId: editCategory,
+        visibility: editVisibility,
+      });
 
-    setEditModalOpen(false);
-    setActiveAlert(`Saved changes for "${editTitle.trim()}".`);
-    setTimeout(() => setActiveAlert(null), 3500);
+      setVideos((prev) =>
+        prev.map((v) => {
+          if (v.id === videoToEdit.id) {
+            return {
+              ...v,
+              title: editTitle.trim(),
+              category: editCategory,
+              visibility: editVisibility,
+              ...(result?.video || {}),
+            };
+          }
+          return v;
+        })
+      );
+
+      setEditModalOpen(false);
+      setActiveAlert(`Saved changes for "${editTitle.trim()}".`);
+      setTimeout(() => setActiveAlert(null), 3500);
+    } catch (err) {
+      console.error('[VideoManagement] Edit error:', err);
+      setActiveAlert(err.response?.data?.message || 'Failed to update video metadata.');
+      setTimeout(() => setActiveAlert(null), 3500);
+    } finally {
+      setIsSubmittingEdit(false);
+    }
   };
 
   // Open Delete Confirmation Modal
@@ -254,20 +298,44 @@ export default function VideoManagement({ onNavigateToUpload, onNavigateToWatch 
     setDeleteModalOpen(true);
   };
 
-  // Confirm Delete
-  const handleConfirmDelete = () => {
+  // Confirm Delete with backend persistence
+  const handleConfirmDelete = async () => {
     if (!videoToDelete) return;
-    setVideos((prev) => prev.filter((v) => v.id !== videoToDelete.id));
-    setDeleteModalOpen(false);
-    setActiveAlert(`Permanently deleted "${videoToDelete.title}". 🗑️`);
-    setTimeout(() => setActiveAlert(null), 3500);
-    setVideoToDelete(null);
+
+    setIsDeleting(true);
+    try {
+      await videoService.deleteVideo(videoToDelete.id);
+      setVideos((prev) => prev.filter((v) => v.id !== videoToDelete.id));
+      setDeleteModalOpen(false);
+      setActiveAlert(`Permanently deleted "${videoToDelete.title}". 🗑️`);
+      setTimeout(() => setActiveAlert(null), 3500);
+      setVideoToDelete(null);
+    } catch (err) {
+      console.error('[VideoManagement] Delete error:', err);
+      setActiveAlert(err.response?.data?.message || 'Failed to delete video.');
+      setTimeout(() => setActiveAlert(null), 3500);
+    } finally {
+      setIsDeleting(false);
+    }
   };
 
   // Preview Action
   const handleOpenPreview = (video) => {
     setVideoToPreview(video);
     setPreviewModalOpen(true);
+  };
+
+  const handlePreviewWatch = () => {
+    if (!videoToPreview) return;
+    const targetId = videoToPreview.id;
+    setPreviewModalOpen(false);
+    try {
+      localStorage.setItem('streamcloud_active_video_id', targetId);
+    } catch {}
+    window.location.hash = `#watch?id=${targetId}`;
+    if (onNavigateToWatch) {
+      onNavigateToWatch(targetId);
+    }
   };
 
   // 1. Admin Authorization Guard
@@ -334,9 +402,13 @@ export default function VideoManagement({ onNavigateToUpload, onNavigateToWatch 
 
   // Aggregate stats
   const totalCount = videos.length;
-  const readyCount = videos.filter((v) => v.status === 'ready').length;
-  const processingCount = videos.filter((v) => v.status === 'processing').length;
-  const failedCount = videos.filter((v) => v.status === 'failed').length;
+  const readyCount = videos.filter((v) => v.status === 'ready' || v.rawStatus === 'READY').length;
+  const processingCount = videos.filter(
+    (v) =>
+      ['processing', 'pending_upload', 'uploaded'].includes((v.status || '').toLowerCase()) ||
+      ['PROCESSING', 'PENDING_UPLOAD', 'UPLOADED'].includes(v.rawStatus)
+  ).length;
+  const failedCount = videos.filter((v) => v.status === 'failed' || v.rawStatus === 'FAILED').length;
 
   return (
     <div className="min-h-screen bg-[#09090b] text-zinc-100 flex flex-col selection:bg-purple-600 selection:text-white">
@@ -378,6 +450,13 @@ export default function VideoManagement({ onNavigateToUpload, onNavigateToWatch 
             </div>
 
             <div className="flex items-center gap-3">
+              <button
+                onClick={fetchVideos}
+                title="Refresh Catalog"
+                className="p-3 rounded-xl bg-zinc-900 hover:bg-zinc-800 text-zinc-400 hover:text-white border border-zinc-800 transition-colors cursor-pointer"
+              >
+                <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin text-purple-400' : ''}`} />
+              </button>
               <button
                 onClick={() => {
                   if (onNavigateToUpload) onNavigateToUpload();
@@ -421,6 +500,22 @@ export default function VideoManagement({ onNavigateToUpload, onNavigateToWatch 
               <p className="text-xl sm:text-2xl font-bold text-rose-300">{failedCount}</p>
             </div>
           </div>
+
+          {/* Error Banner if API failed */}
+          {fetchError && (
+            <div className="flex items-center justify-between p-4 rounded-2xl bg-rose-500/10 border border-rose-500/30 text-rose-300 text-xs sm:text-sm">
+              <div className="flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 text-rose-400 flex-shrink-0" />
+                <span>{fetchError}</span>
+              </div>
+              <button
+                onClick={fetchVideos}
+                className="px-3 py-1 rounded-lg bg-rose-500/20 hover:bg-rose-500/30 text-rose-200 font-semibold cursor-pointer"
+              >
+                Retry
+              </button>
+            </div>
+          )}
 
           {/* 3 & 4. Search and Filter Bar */}
           <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-4 p-4 rounded-2xl bg-zinc-900/70 border border-zinc-800/80">
@@ -493,204 +588,216 @@ export default function VideoManagement({ onNavigateToUpload, onNavigateToWatch 
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-zinc-800/60 text-xs text-zinc-300">
-                    {paginatedVideos.map((video) => (
-                      <tr
-                        key={video.id}
-                        className="hover:bg-zinc-800/40 transition-colors group"
-                      >
-                        {/* Video Thumbnail + Title */}
-                        <td className="py-3 px-4">
-                          <div className="flex items-center gap-3">
-                            <div className="relative aspect-video w-20 sm:w-24 rounded-lg overflow-hidden bg-black flex-shrink-0 border border-zinc-800">
-                              <img
-                                src={video.thumbnailUrl}
-                                alt={video.title}
-                                className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                              />
+                    {paginatedVideos.map((video) => {
+                      const isReady = video.status === 'ready' || video.rawStatus === 'READY';
+                      const isFailed = video.status === 'failed' || video.rawStatus === 'FAILED';
+                      const displayStatus = video.rawStatus || video.status;
+
+                      return (
+                        <tr
+                          key={video.id}
+                          className="hover:bg-zinc-800/40 transition-colors group"
+                        >
+                          {/* Video Thumbnail + Title */}
+                          <td className="py-3 px-4">
+                            <div className="flex items-center gap-3">
+                              <div className="relative aspect-video w-20 sm:w-24 rounded-lg overflow-hidden bg-black flex-shrink-0 border border-zinc-800">
+                                <img
+                                  src={video.thumbnailUrl}
+                                  alt={video.title}
+                                  className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                                />
+                              </div>
+                              <div className="min-w-0 max-w-xs">
+                                <p className="font-bold text-white truncate group-hover:text-purple-300 transition-colors">
+                                  {video.title}
+                                </p>
+                                <p className="text-[11px] text-zinc-500 font-mono">
+                                  ID: {video.id}
+                                </p>
+                              </div>
                             </div>
-                            <div className="min-w-0 max-w-xs">
-                              <p className="font-bold text-white truncate group-hover:text-purple-300 transition-colors">
-                                {video.title}
-                              </p>
-                              <p className="text-[11px] text-zinc-500 font-mono">
-                                ID: {video.id}
-                              </p>
-                            </div>
-                          </div>
-                        </td>
+                          </td>
 
-                        {/* Category */}
-                        <td className="py-3 px-4">
-                          <span className="px-2.5 py-1 rounded-full text-[10px] font-semibold bg-zinc-800 text-purple-300 border border-zinc-700">
-                            {video.category}
-                          </span>
-                        </td>
+                          {/* Category */}
+                          <td className="py-3 px-4">
+                            <span className="px-2.5 py-1 rounded-full text-[10px] font-semibold bg-zinc-800 text-purple-300 border border-zinc-700">
+                              {video.category}
+                            </span>
+                          </td>
 
-                        {/* Views & Duration */}
-                        <td className="py-3 px-4">
-                          <p className="font-semibold text-white">{video.views} views</p>
-                          <p className="text-zinc-500 text-[11px]">{video.duration}</p>
-                        </td>
+                          {/* Views & Duration */}
+                          <td className="py-3 px-4">
+                            <p className="font-semibold text-white">{video.views} views</p>
+                            <p className="text-zinc-500 text-[11px]">{video.duration}</p>
+                          </td>
 
-                        {/* Upload Date */}
-                        <td className="py-3 px-4 text-zinc-400">
-                          {video.uploadDate}
-                        </td>
+                          {/* Upload Date */}
+                          <td className="py-3 px-4 text-zinc-400">
+                            {video.uploadDate || video.uploadedAt}
+                          </td>
 
-                        {/* Processing Status Badge */}
-                        <td className="py-3 px-4">
-                          <span
-                            className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase ${
-                              video.status === 'ready'
-                                ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30'
-                                : video.status === 'processing'
-                                ? 'bg-purple-500/10 text-purple-400 border border-purple-500/30 animate-pulse'
-                                : 'bg-rose-500/10 text-rose-400 border border-rose-500/30'
-                            }`}
-                          >
+                          {/* Processing Status Badge */}
+                          <td className="py-3 px-4">
                             <span
-                              className={`w-1.5 h-1.5 rounded-full ${
-                                video.status === 'ready'
-                                  ? 'bg-emerald-400'
-                                  : video.status === 'processing'
-                                  ? 'bg-purple-400'
-                                  : 'bg-rose-400'
+                              className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase ${
+                                isReady
+                                  ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30'
+                                  : isFailed
+                                  ? 'bg-rose-500/10 text-rose-400 border border-rose-500/30'
+                                  : 'bg-purple-500/10 text-purple-400 border border-purple-500/30 animate-pulse'
                               }`}
-                            />
-                            {video.status}
-                          </span>
-                        </td>
-
-                        {/* Visibility Badge */}
-                        <td className="py-3 px-4">
-                          <button
-                            onClick={() => handleToggleVisibility(video.id)}
-                            title="Click to toggle visibility"
-                            className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-semibold transition-all cursor-pointer ${
-                              video.visibility === 'public'
-                                ? 'bg-purple-900/40 text-purple-300 border border-purple-500/30 hover:bg-purple-900/60'
-                                : 'bg-zinc-800 text-zinc-400 border border-zinc-700 hover:bg-zinc-700'
-                            }`}
-                          >
-                            {video.visibility === 'public' ? (
-                              <Globe className="w-3 h-3 text-purple-400" />
-                            ) : (
-                              <Lock className="w-3 h-3 text-zinc-400" />
-                            )}
-                            <span className="capitalize">{video.visibility}</span>
-                          </button>
-                        </td>
-
-                        {/* Actions */}
-                        <td className="py-3 px-4 text-right">
-                          <div className="flex items-center justify-end gap-1.5">
-                            {/* View Action */}
-                            <button
-                              onClick={() => handleOpenPreview(video)}
-                              title="Preview Video"
-                              className="p-1.5 text-zinc-400 hover:text-white rounded-lg hover:bg-zinc-800 transition-colors cursor-pointer"
                             >
-                              <Eye className="w-4 h-4" />
-                            </button>
+                              <span
+                                className={`w-1.5 h-1.5 rounded-full ${
+                                  isReady
+                                    ? 'bg-emerald-400'
+                                    : isFailed
+                                    ? 'bg-rose-400'
+                                    : 'bg-purple-400'
+                                }`}
+                              />
+                              {displayStatus}
+                            </span>
+                          </td>
 
-                            {/* Edit Action */}
+                          {/* Visibility Badge */}
+                          <td className="py-3 px-4">
                             <button
-                              onClick={() => handleOpenEditModal(video)}
-                              title="Edit Metadata"
-                              className="p-1.5 text-zinc-400 hover:text-purple-300 rounded-lg hover:bg-purple-600/20 transition-colors cursor-pointer"
+                              onClick={() => handleToggleVisibility(video.id)}
+                              title="Click to toggle visibility"
+                              className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-semibold transition-all cursor-pointer ${
+                                video.visibility === 'public'
+                                  ? 'bg-purple-900/40 text-purple-300 border border-purple-500/30 hover:bg-purple-900/60'
+                                  : 'bg-zinc-800 text-zinc-400 border border-zinc-700 hover:bg-zinc-700'
+                              }`}
                             >
-                              <Edit2 className="w-4 h-4" />
+                              {video.visibility === 'public' ? (
+                                <Globe className="w-3 h-3 text-purple-400" />
+                              ) : (
+                                <Lock className="w-3 h-3 text-zinc-400" />
+                              )}
+                              <span className="capitalize">{video.visibility}</span>
                             </button>
+                          </td>
 
-                            {/* Delete Action */}
-                            <button
-                              onClick={() => handleOpenDeleteModal(video)}
-                              title="Delete Video"
-                              className="p-1.5 text-zinc-400 hover:text-rose-400 rounded-lg hover:bg-rose-500/20 transition-colors cursor-pointer"
-                            >
-                              <Trash2 className="w-4 h-4" />
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
+                          {/* Actions */}
+                          <td className="py-3 px-4 text-right">
+                            <div className="flex items-center justify-end gap-1.5">
+                              {/* View Action */}
+                              <button
+                                onClick={() => handleOpenPreview(video)}
+                                title="Preview Video"
+                                className="p-1.5 text-zinc-400 hover:text-white rounded-lg hover:bg-zinc-800 transition-colors cursor-pointer"
+                              >
+                                <Eye className="w-4 h-4" />
+                              </button>
+
+                              {/* Edit Action */}
+                              <button
+                                onClick={() => handleOpenEditModal(video)}
+                                title="Edit Metadata"
+                                className="p-1.5 text-zinc-400 hover:text-purple-300 rounded-lg hover:bg-purple-600/20 transition-colors cursor-pointer"
+                              >
+                                <Edit2 className="w-4 h-4" />
+                              </button>
+
+                              {/* Delete Action */}
+                              <button
+                                onClick={() => handleOpenDeleteModal(video)}
+                                title="Delete Video"
+                                className="p-1.5 text-zinc-400 hover:text-rose-400 rounded-lg hover:bg-rose-500/20 transition-colors cursor-pointer"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
 
               {/* Mobile Card List View */}
               <div className="md:hidden space-y-3">
-                {paginatedVideos.map((video) => (
-                  <div
-                    key={video.id}
-                    className="p-4 rounded-2xl bg-zinc-900/90 border border-zinc-800/80 space-y-3"
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className="relative aspect-video w-24 rounded-lg overflow-hidden bg-black flex-shrink-0">
-                        <img
-                          src={video.thumbnailUrl}
-                          alt={video.title}
-                          className="w-full h-full object-cover"
-                        />
+                {paginatedVideos.map((video) => {
+                  const isReady = video.status === 'ready' || video.rawStatus === 'READY';
+                  const isFailed = video.status === 'failed' || video.rawStatus === 'FAILED';
+                  const displayStatus = video.rawStatus || video.status;
+
+                  return (
+                    <div
+                      key={video.id}
+                      className="p-4 rounded-2xl bg-zinc-900/90 border border-zinc-800/80 space-y-3"
+                    >
+                      <div className="flex items-center gap-3">
+                        <div className="relative aspect-video w-24 rounded-lg overflow-hidden bg-black flex-shrink-0">
+                          <img
+                            src={video.thumbnailUrl}
+                            alt={video.title}
+                            className="w-full h-full object-cover"
+                          />
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <h4 className="font-bold text-sm text-white line-clamp-1">
+                            {video.title}
+                          </h4>
+                          <p className="text-xs text-zinc-400 mt-0.5">
+                            {video.category} • {video.views} views
+                          </p>
+                        </div>
                       </div>
-                      <div className="min-w-0 flex-1">
-                        <h4 className="font-bold text-sm text-white line-clamp-1">
-                          {video.title}
-                        </h4>
-                        <p className="text-xs text-zinc-400 mt-0.5">
-                          {video.category} • {video.views} views
-                        </p>
+
+                      <div className="flex items-center justify-between text-xs pt-1 border-t border-zinc-800/80">
+                        <span
+                          className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase ${
+                            isReady
+                              ? 'bg-emerald-500/20 text-emerald-300'
+                              : isFailed
+                              ? 'bg-rose-500/20 text-rose-300'
+                              : 'bg-purple-500/20 text-purple-300'
+                          }`}
+                        >
+                          {displayStatus}
+                        </span>
+
+                        <button
+                          onClick={() => handleToggleVisibility(video.id)}
+                          className="flex items-center gap-1 text-[11px] text-zinc-400 hover:text-white capitalize"
+                        >
+                          {video.visibility === 'public' ? (
+                            <Globe className="w-3.5 h-3.5 text-purple-400" />
+                          ) : (
+                            <Lock className="w-3.5 h-3.5" />
+                          )}
+                          <span className="capitalize">{video.visibility}</span>
+                        </button>
+
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={() => handleOpenPreview(video)}
+                            className="p-1.5 text-zinc-400 hover:text-white"
+                          >
+                            <Eye className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={() => handleOpenEditModal(video)}
+                            className="p-1.5 text-purple-400"
+                          >
+                            <Edit2 className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={() => handleOpenDeleteModal(video)}
+                            className="p-1.5 text-rose-400"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
                       </div>
                     </div>
-
-                    <div className="flex items-center justify-between text-xs pt-1 border-t border-zinc-800/80">
-                      <span
-                        className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase ${
-                          video.status === 'ready'
-                            ? 'bg-emerald-500/20 text-emerald-300'
-                            : video.status === 'processing'
-                            ? 'bg-purple-500/20 text-purple-300'
-                            : 'bg-rose-500/20 text-rose-300'
-                        }`}
-                      >
-                        {video.status}
-                      </span>
-
-                      <button
-                        onClick={() => handleToggleVisibility(video.id)}
-                        className="flex items-center gap-1 text-[11px] text-zinc-400 hover:text-white capitalize"
-                      >
-                        {video.visibility === 'public' ? (
-                          <Globe className="w-3.5 h-3.5 text-purple-400" />
-                        ) : (
-                          <Lock className="w-3.5 h-3.5" />
-                        )}
-                        <span>{video.visibility}</span>
-                      </button>
-
-                      <div className="flex items-center gap-2">
-                        <button
-                          onClick={() => handleOpenPreview(video)}
-                          className="p-1.5 text-zinc-400 hover:text-white"
-                        >
-                          <Eye className="w-4 h-4" />
-                        </button>
-                        <button
-                          onClick={() => handleOpenEditModal(video)}
-                          className="p-1.5 text-purple-400"
-                        >
-                          <Edit2 className="w-4 h-4" />
-                        </button>
-                        <button
-                          onClick={() => handleOpenDeleteModal(video)}
-                          className="p-1.5 text-rose-400"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
 
               {/* 10. Pagination Controls */}
@@ -778,7 +885,7 @@ export default function VideoManagement({ onNavigateToUpload, onNavigateToWatch 
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div
             className="fixed inset-0 bg-black/80 backdrop-blur-sm"
-            onClick={() => setDeleteModalOpen(false)}
+            onClick={() => !isDeleting && setDeleteModalOpen(false)}
           />
 
           <div className="relative w-full max-w-md bg-zinc-950 border border-zinc-800 rounded-3xl p-6 sm:p-7 space-y-5 z-10 shadow-2xl animate-fadeIn">
@@ -798,17 +905,20 @@ export default function VideoManagement({ onNavigateToUpload, onNavigateToWatch 
             <div className="flex items-center gap-3 pt-2">
               <button
                 type="button"
+                disabled={isDeleting}
                 onClick={() => setDeleteModalOpen(false)}
-                className="flex-1 py-2.5 rounded-xl bg-zinc-900 hover:bg-zinc-800 text-zinc-300 text-xs font-semibold border border-zinc-700 transition-colors cursor-pointer"
+                className="flex-1 py-2.5 rounded-xl bg-zinc-900 hover:bg-zinc-800 disabled:opacity-50 text-zinc-300 text-xs font-semibold border border-zinc-700 transition-colors cursor-pointer"
               >
                 Cancel
               </button>
               <button
                 type="button"
+                disabled={isDeleting}
                 onClick={handleConfirmDelete}
-                className="flex-1 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-semibold shadow-lg shadow-rose-600/30 transition-colors cursor-pointer"
+                className="flex-1 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-500 disabled:opacity-50 text-white text-xs font-semibold shadow-lg shadow-rose-600/30 transition-colors cursor-pointer flex items-center justify-center gap-1.5"
               >
-                Delete Video
+                {isDeleting && <RefreshCw className="w-3.5 h-3.5 animate-spin" />}
+                <span>{isDeleting ? 'Deleting...' : 'Delete Video'}</span>
               </button>
             </div>
           </div>
@@ -820,7 +930,7 @@ export default function VideoManagement({ onNavigateToUpload, onNavigateToWatch 
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div
             className="fixed inset-0 bg-black/80 backdrop-blur-sm"
-            onClick={() => setEditModalOpen(false)}
+            onClick={() => !isSubmittingEdit && setEditModalOpen(false)}
           />
 
           <div className="relative w-full max-w-md bg-zinc-950 border border-zinc-800 rounded-3xl p-6 sm:p-7 space-y-5 z-10 shadow-2xl animate-fadeIn">
@@ -830,6 +940,7 @@ export default function VideoManagement({ onNavigateToUpload, onNavigateToWatch 
                 Edit Video Details
               </h3>
               <button
+                disabled={isSubmittingEdit}
                 onClick={() => setEditModalOpen(false)}
                 className="text-zinc-400 hover:text-white"
               >
@@ -904,16 +1015,19 @@ export default function VideoManagement({ onNavigateToUpload, onNavigateToWatch 
               <div className="flex items-center gap-3 pt-3">
                 <button
                   type="button"
+                  disabled={isSubmittingEdit}
                   onClick={() => setEditModalOpen(false)}
-                  className="flex-1 py-2.5 rounded-xl bg-zinc-900 hover:bg-zinc-800 text-zinc-300 text-xs font-semibold border border-zinc-700 cursor-pointer"
+                  className="flex-1 py-2.5 rounded-xl bg-zinc-900 hover:bg-zinc-800 disabled:opacity-50 text-zinc-300 text-xs font-semibold border border-zinc-700 cursor-pointer"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className="flex-1 py-2.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-semibold shadow-lg shadow-purple-600/30 cursor-pointer"
+                  disabled={isSubmittingEdit}
+                  className="flex-1 py-2.5 rounded-xl bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white text-xs font-semibold shadow-lg shadow-purple-600/30 cursor-pointer flex items-center justify-center gap-1.5"
                 >
-                  Save Changes
+                  {isSubmittingEdit && <RefreshCw className="w-3.5 h-3.5 animate-spin" />}
+                  <span>{isSubmittingEdit ? 'Saving...' : 'Save Changes'}</span>
                 </button>
               </div>
             </form>
@@ -955,16 +1069,12 @@ export default function VideoManagement({ onNavigateToUpload, onNavigateToWatch 
 
             <div className="flex items-center justify-between text-xs text-zinc-400">
               <span>Category: {videoToPreview.category}</span>
-              <span>Status: {videoToPreview.status}</span>
-              <span>Visibility: {videoToPreview.visibility}</span>
+              <span className="uppercase">Status: {videoToPreview.rawStatus || videoToPreview.status}</span>
+              <span className="capitalize">Visibility: {videoToPreview.visibility}</span>
             </div>
 
             <button
-              onClick={() => {
-                setPreviewModalOpen(false);
-                if (onNavigateToWatch) onNavigateToWatch();
-                else window.location.hash = '#watch';
-              }}
+              onClick={handlePreviewWatch}
               className="w-full py-2.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold transition-colors cursor-pointer"
             >
               Open in 4K Player
